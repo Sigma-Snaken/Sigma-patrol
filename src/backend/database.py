@@ -43,6 +43,7 @@ def init_db():
             total_tokens INTEGER,
             image_path TEXT,
             timestamp TEXT,
+            robot_moving_status TEXT,
             FOREIGN KEY(run_id) REFERENCES patrol_runs(id)
         )
     ''')
@@ -89,6 +90,15 @@ def init_db():
             cursor.execute("ALTER TABLE patrol_runs ADD COLUMN total_tokens INTEGER")
         except Exception as e:
             print(f"Migration warning (patrol_runs tokens): {e}")
+
+    try:
+        cursor.execute("SELECT robot_moving_status FROM inspection_results LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Migrating Database: Adding robot_moving_status to inspection_results...")
+        try:
+            cursor.execute("ALTER TABLE inspection_results ADD COLUMN robot_moving_status TEXT")
+        except Exception as e:
+            print(f"Migration warning (inspection_results robot_moving_status): {e}")
 
     conn.commit()
     conn.close()

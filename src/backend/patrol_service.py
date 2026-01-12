@@ -51,7 +51,12 @@ class PatrolService:
         with self.patrol_lock:
             self.is_patrolling = False
             self.patrol_status = "Stopping..."
+        
         logger.info("Stop patrol requested.")
+        robot_service.cancel_command()
+        logger.info("Command cancelled.")
+        robot_service.return_home()
+        logger.info("Returning home.")
         return True
 
     def _inspection_worker(self):
@@ -119,6 +124,7 @@ class PatrolService:
                     
                     os.rename(image_path, new_full_path)
                     image_path = new_full_path
+                    logger.info(f"Renamed image for {point_name} to {new_filename}")
                 except Exception as e:
                     logger.error(f"Worker Rename Error for {point_name}: {e}")
 
@@ -128,9 +134,9 @@ class PatrolService:
                     cursor = conn.cursor()
                     cursor.execute(
                         '''INSERT INTO inspection_results 
-                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, image_path.replace(os.path.join(IMAGES_DIR, ""), "").lstrip('/'), get_current_time_str())
+                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, image_path.replace(os.path.join(IMAGES_DIR, ""), "").lstrip('/'), get_current_time_str(), "Success")
                     )
                     conn.commit()
                     conn.close()
@@ -203,40 +209,58 @@ class PatrolService:
             logger.info(f"Moving to point {i+1}/{len(to_patrol)}: {point_name}")
             
             # Move
+            move_status = "Unknown"
             if robot_service.get_client():
                 try:
                     target_x = float(point['x'])
                     target_y = float(point['y'])
                     target_theta = float(point.get('theta', 0.0))
                     
-                    if not robot_service.move_to(target_x, target_y, target_theta):
-                        logger.error(f"Failed to send move command for {point_name}")
+                    # Blocking call, returns Result object
+                    result = robot_service.move_to(target_x, target_y, target_theta, wait=True)
                     
-                    # Wait for arrival
-                    start_move_time = time.time()
-                    while self.is_patrolling:
-                        state = robot_service.get_state()
-                        res_x = state['pose']['x']
-                        res_y = state['pose']['y']
-                        
-                        dist = ((res_x - target_x)**2 + (res_y - target_y)**2)**0.5
-                        if dist < 0.1: 
-                            break
-                        
-                        if time.time() - start_move_time > 60:
-                            self.patrol_status = f"Timeout moving to {point_name}"
-                            logger.warning(f"Timeout moving to {point_name}")
-                            break
-                        
-                        time.sleep(0.5)
-                    
+                    if result:
+                        if getattr(result, 'success', False):
+                            move_status = "Success"
+                            logger.info(f"Move to {point_name} successful.")
+                        else:
+                            # Try to get error code
+                            error_code = getattr(result, 'error_code', 'Unknown')
+                            move_status = f"Error: {error_code}"
+                            self.patrol_status = f"Move Failed: {move_status}"
+                            logger.warning(f"Move failed for {point_name}: {move_status}")
+                    else:
+                        move_status = "Error: No Result"
+                        logger.error(f"No result from move_to for {point_name}")
+
                 except Exception as e:
+                    move_status = f"Error: {e}"
                     self.patrol_status = f"Move Error: {e}"
                     logger.error(f"Patrol Move Error for {point_name}: {e}")
-                    time.sleep(2)
-                    continue
             else:
+                 move_status = "Error: Disconnected"
                  logger.error("Robot service not connected during patrol.")
+            
+            # Check move status
+            if move_status != "Success":
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        '''INSERT INTO inspection_results 
+                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (self.current_run_id, point_name, point.get('x'), point.get('y'), "", "Move Failed", 1, move_status, "{}", 0, 0, 0, "", get_current_time_str(), move_status)
+                    )
+                    conn.commit()
+                    conn.close()
+                except Exception as db_e:
+                    logger.error(f"DB Error saving move failure for {point_name}: {db_e}")
+                
+                # Continue specific request: "Once ... receives error or success ... can execute next action"
+                # If error, we logged it and saved to DB. User usually implies skipping inspection if move failed.
+                time.sleep(1)
+                continue
             
             if not self.is_patrolling: break
 
@@ -315,9 +339,9 @@ class PatrolService:
                         cursor = conn.cursor()
                         cursor.execute(
                         '''INSERT INTO inspection_results 
-                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (self.current_run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, img_path_rel, get_current_time_str())
+                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (self.current_run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, img_path_rel, get_current_time_str(), "Success")
                         )
                         conn.commit()
                         conn.close()

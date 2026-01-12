@@ -98,11 +98,10 @@ class RobotService:
     def get_map_bytes(self):
         return self.map_image_bytes
 
-    def move_to(self, x, y, theta):
+    def move_to(self, x, y, theta, wait=True):
         if self.client:
-            self.client.move_to_pose(x, y, theta)
-            return True
-        return False
+            return self.client.move_to_pose(x, y, theta, wait_for_completion=wait)
+        return None
         
     def move_forward(self, distance, speed=0.1):
          if self.client:

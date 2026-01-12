@@ -701,3 +701,9 @@ body {
     70% { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0); }
     100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
 }
+
+/* Custom styling for Timezone dropdown options */
+#setting-timezone option {
+    color: black;
+    background-color: white;
+}

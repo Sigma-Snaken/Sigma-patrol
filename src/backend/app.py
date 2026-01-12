@@ -76,7 +76,7 @@ def move_robot():
     if x is None or y is None:
         return jsonify({"error": "Missing x or y"}), 400
         
-    if robot_service.move_to(x, y, theta):
+    if robot_service.move_to(x, y, theta, wait=False):
         return jsonify({"status": "Moving", "target": {"x": x, "y": y, "theta": theta}})
     else:
         return jsonify({"error": "Robot not connected or failed"}), 503
