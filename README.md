@@ -63,7 +63,7 @@ my-ai-project/
 
 3. **系統設定**
    - 進入「檢測設定」頁面。
-   - 輸入您的 **Google Jeimini API Key**。
+   - 輸入您的 **Google Gemini API Key**。
    - 輸入 **Kachaka 機器人 IP**。
    - 儲存設定後，系統即準備就緒。
 
