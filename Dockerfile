@@ -1,5 +1,6 @@
 FROM python:3.10-slim
-
+# 在 Dockerfile 裡加入這行
+LABEL org.opencontainers.image.source=https://github.com/snaken/sigma-patrol
 # Prevent Python from writing pyc files to disc
 ENV PYTHONDONTWRITEBYTECODE=1
 # Prevent Python from buffering stdout and stderr
