@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sigma Single Robot Patrol with Gemini</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="glass-header">
+            <div class="logo">SIGMA SINGLE ROBOT PATROL WITH GEMINI</div>
+
+            <div class="tabs" style="position: absolute; left: 50%; transform: translateX(-50%);margin:0;">
+                <button class="tab-btn" onclick="switchTab('patrol')">巡邏</button>
+                <button class="tab-btn active" onclick="switchTab('control')">檢測設定</button>
+                <button class="tab-btn" onclick="switchTab('history')">歷史紀錄</button>
+                <button class="tab-btn" onclick="switchTab('settings')">系統設定</button>
+            </div>
+
+            <div class="status-bar">
+                <span class="status-item">
+                    <span class="label">BATTERY</span>
+                    <span class="value" id="battery-value">--%</span>
+                </span>
+                <span class="status-item">
+                    <span class="label">TIME</span>
+                    <span class="value" id="time-value">--:--</span>
+                </span>
+                <div class="connection-light" id="connection-status"></div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- Tabs moved to header -->
+
+            <!-- CONTROL VIEW -->
+            <div id="view-control" class="tab-content no-padding" style="padding-top: 60px;">
+                <!-- Custom padding handling -->
+
+                <div class="split-view">
+                    <!-- LEFT: MAP -->
+                    <div class="left-panel">
+                        <div class="map-container" id="map-container">
+                            <div class="loading-overlay" id="map-loading">
+                                <div class="spinner"></div>
+                                <p>Loading Map...</p>
+                            </div>
+                            <canvas id="map-canvas"></canvas>
+                        </div>
+
+                        <!-- Float Controls on Map -->
+                        <div class="controls-panel">
+                            <div
+                                style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 10px;">
+                                <div style="display: flex; flex: 1; gap: 5px; margin-right: 15px;">
+                                    <button id="btn-home" class="btn-premium" style="flex: 1;">
+                                        <span class="icon">🏠</span> Return Home
+                                    </button>
+                                    <button id="btn-cancel-command" class="btn-danger"
+                                        style="flex: 0 0 auto; padding: 0 15px;" title="Stop Moving">
+                                        <span class="icon">⏹</span>
+                                    </button>
+                                </div>
+                                <div class="d-pad">
+                                    <button class="up" onclick="manualControl('forward')"
+                                        title="Forward 0.1m">▲</button>
+                                    <button class="left" onclick="manualControl('left')" title="Let 10°">◀</button>
+                                    <button class="down" onclick="manualControl('backward')"
+                                        title="Backward 0.1m">▼</button>
+                                    <button class="right" onclick="manualControl('right')" title="Right 10°">▶</button>
+                                </div>
+                            </div>
+                            <div class="info-text">
+                                <p>Click to Move • Drag to Set Pose</p>
+                                <p id="pose-display">X: -- Y: -- T: --</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT: CAMERA, AI, POINTS -->
+                    <div class="right-panel">
+                        <div class="header" style="padding: 0; text-align: left;">
+                            <h2 style="margin:0;">Control & Monitor</h2>
+                        </div>
+
+                        <!-- Camera -->
+                        <div class="camera-section">
+                            <h3 style="margin:0; align-self: flex-start;">Front Camera</h3>
+                            <img src="/api/camera/front" width="320" height="240"
+                                style="background: #333; border-radius: 8px; width: 100%; height: auto; max-width: 480px;" />
+                        </div>
+
+                        <!-- AI Test -->
+                        <div class="ai-test-section">
+                            <h3 style="margin:0 0 10px 0;">AI Recognition Test</h3>
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <input type="text" id="ai-test-prompt-input"
+                                    placeholder="Enter prompt here (e.g. 'Is there a fire?')"
+                                    style="flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #555; background: rgba(0,0,0,0.3); color: white;">
+                                <button id="btn-test-ai" class="btn-premium" style="width: auto; padding: 0 20px;">
+                                    <span class="icon">🤖</span> Test
+                                </button>
+                            </div>
+
+                            <div class="ai-output-container"
+                                style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px; font-size: 0.9rem;">
+                                <div style="margin-bottom: 5px;">
+                                    <span style="color: #26c6da; font-weight: bold;">PROMPT:</span>
+                                    <span id="ai-output-prompt" style="color: #aaa; font-style: italic;">-</span>
+                                </div>
+                                <div>
+                                    <span style="color: #00e676; font-weight: bold;">RESULT:</span>
+                                    <div id="ai-output-result"
+                                        style="color: #e0e0e0; white-space: pre-wrap; margin-top: 5px; padding-left: 10px; border-left: 2px solid #555;">
+                                        -</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Points -->
+                        <div class="points-section">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <h3 style="margin:0;">Patrol Points</h3>
+                                <div style="display:flex; gap:5px;">
+                                    <button id="btn-save-points"
+                                        style="padding: 5px 15px; font-size: 0.8rem; background: #00e676; color: black; font-weight: bold; border: none; border-radius: 4px; box-shadow: 0 0 8px rgba(0,230,118,0.6); cursor: pointer; margin-right: 5px;">SAVE</button>
+                                    <button class="btn-secondary" id="btn-export-points"
+                                        style="padding: 5px 10px; font-size: 0.8rem;">Export</button>
+                                    <button class="btn-secondary" id="btn-import-points"
+                                        style="padding: 5px 10px; font-size: 0.8rem;">Import</button>
+                                    <button class="btn-secondary" id="btn-add-point-quick"
+                                        style="padding: 5px 10px; font-size: 0.8rem;">+ Add Here</button>
+                                </div>
+                                <input type="file" id="import-file-input" style="display:none" accept=".json">
+                            </div>
+                            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                                <table class="data-table" id="points-table-quick">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th style="width: 40%;">Prompt</th>
+                                            <th>Test</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <!-- Removed the 'Manage Full Patrol' button as requested functionality is now here -->
+
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- PATROL VIEW -->
+            <div id="view-patrol" class="tab-content no-padding" style="padding-top: 60px; display: none;">
+                <div class="split-view">
+                    <!-- LEFT: CAMERA + MAP -->
+                    <div class="left-panel" id="patrol-left-panel">
+                        <!-- Camera -->
+                        <div class="camera-section">
+                            <h4 style="margin: 0 0 5px 0; color: #aaa; padding: 5px 10px;">Robot Vision</h4>
+                            <div style="background:#000; text-align:center;">
+                                <img src="/api/camera/front"
+                                    style="max-width: 100%; max-height: 300px; height:auto; border-radius: 0;">
+                            </div>
+                        </div>
+                        <!-- Map container will be appended here when active (takes remaining space) -->
+                    </div>
+
+                    <!-- RIGHT: MONITOR INFO -->
+                    <div class="right-panel">
+                        <div class="header"
+                            style="padding: 0; margin-bottom:0; text-align: left; display:flex; justify-content:space-between; align-items:center;">
+                            <h2 style="margin:0;">Live Monitor</h2>
+                            <div class="actions">
+                                <button class="btn-primary" id="btn-start-patrol">▶ Start</button>
+                                <button class="btn-danger" id="btn-stop-patrol" disabled>⏹ Stop</button>
+                            </div>
+                        </div>
+
+                        <!-- 1. Latest Analysis Frame -->
+                        <div class="monitor-frame" style="flex: 0 0 auto;">
+                            <div class="frame-header">
+                                <h4 style="color: #26c6da;">Latest AI Analysis</h4>
+                            </div>
+                            <div class="frame-content">
+                                <div id="patrol-latest-result" class="content-pad"
+                                    style="min-height: 60px; color: #e0e0e0; font-size: 0.9rem;">
+                                    Waiting for data...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 2. Patrol Route Frame -->
+                        <div class="monitor-frame" style="flex: 1;">
+                            <div class="frame-header" style="display:flex; justify-content:space-between;">
+                                <h4>Patrol Route</h4>
+                                <span style="font-size:0.7rem; color:#888;">Order & Active</span>
+                            </div>
+                            <div class="frame-content">
+                                <table class="data-table" id="patrol-view-points-table" style="width:100%;">
+                                    <thead style="position:sticky; top:0; background:#222; z-index:1;">
+                                        <tr>
+                                            <th>Location</th>
+                                            <th style="width: 50px;">Active</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- JS Populated -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 3. History Log Frame -->
+                        <div class="monitor-frame" style="flex: 1;">
+                            <div class="frame-header">
+                                <h4>History Log</h4>
+                            </div>
+                            <div class="frame-content">
+                                <div id="results-container" class="results-grid">
+                                    <!-- JS Populated -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- HISTORY VIEW -->
+            <div id="view-history" class="tab-content" style="display: none; padding-top: 80px;">
+                <div class="header">
+                    <h1>Patrol History</h1>
+                </div>
+                <div id="history-list" class="glass-panel"
+                    style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:15px; max-height: 80vh; overflow-y: auto;">
+                    <!-- JS Populated -->
+                </div>
+            </div>
+
+            <!-- MODAL for details -->
+            <div id="history-modal"
+                style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
+                <div
+                    style="background:#1e1e1e; width:90%; max-width:800px; max-height:90vh; border-radius:12px; border:1px solid #333; display:flex; flex-direction:column; overflow:hidden; box-shadow: 0 0 30px rgba(0,0,0,0.5);">
+                    <div
+                        style="padding:15px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center; background:#252525;">
+                        <h2 id="modal-title" style="margin:0; font-size:1.2rem; color:#fff;">Report Details</h2>
+                        <button onclick="closeHistoryModal()"
+                            style="background:none; border:none; color:#aaa; font-size:1.5rem; cursor:pointer;">&times;</button>
+                    </div>
+                    <div style="flex:1; overflow-y:auto; padding:20px;">
+                        <div style="margin-bottom:20px;">
+                            <h3 style="color:#26c6da; margin-top:0;">AI Summary Report</h3>
+                            <div id="modal-report-content"
+                                style="background:rgba(255,255,255,0.05); padding:15px; border-radius:6px; line-height:1.6; color:#e0e0e0; white-space: pre-wrap;">
+                            </div>
+                        </div>
+                        <div>
+                            <h3 style="color:#26c6da;">Inspection Points</h3>
+                            <div id="modal-inspections-list" style="display:flex; flex-direction:column; gap:10px;">
+                                <!-- Items -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SETTINGS VIEW -->
+            <div id="view-settings" class="tab-content" style="display: none; padding-top: 80px;">
+                <div class="header">
+                    <h1>Settings</h1>
+                </div>
+                <div class="form-container glass-panel">
+                    <div class="form-group">
+                        <label>Robot IP Address</label>
+                        <input type="text" id="setting-robot-ip" placeholder="e.g. 192.168.50.133:26400">
+                    </div>
+                    <div class="form-group">
+                        <label>Gemini API Key</label>
+                        <input type="password" id="setting-api-key" placeholder="Enter Gemini API Key">
+                    </div>
+                    <div class="form-group">
+                        <label>Gemini Model</label>
+                        <input type="text" id="setting-model" value="gemini-1.5-flash">
+                    </div>
+                    <div class="form-group">
+                        <label>Timezone</label>
+                        <select id="setting-timezone"
+                            style="background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid #555; padding: 8px; border-radius: 4px;">
+                            <option value="UTC">UTC</option>
+                            <option value="Asia/Taipei">Asia/Taipei</option>
+                            <option value="Asia/Tokyo">Asia/Tokyo</option>
+                            <option value="America/New_York">America/New_York</option>
+                            <option value="America/Los_Angeles">America/Los_Angeles</option>
+                            <option value="Europe/London">Europe/London</option>
+                        </select>
+                    </div>
+                    <div class="form-group"
+                        style="flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;">
+                        <input type="checkbox" id="setting-turbo-mode" style="width: auto; margin: 0;">
+                        <label for="setting-turbo-mode" style="margin: 0;">Enable Turbo Mode (Async Analysis)</label>
+                    </div>
+                    <div class="form-group">
+                        <label>System Role / Prompt</label>
+                        <textarea id="setting-role" rows="4"></textarea>
+                    </div>
+                    <button class="btn-primary" id="btn-save-settings">Save Settings</button>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

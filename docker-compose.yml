@@ -1,0 +1,15 @@
+services:
+  app:
+    container_name: sigma_patrol_gemini
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+      - TZ=Asia/Taipei
+    restart: unless-stopped
