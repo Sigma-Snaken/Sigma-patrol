@@ -1144,8 +1144,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const start = new Date();
             start.setMonth(start.getMonth() - 1); // Last month
 
-            endInput.valueAsDate = end;
-            startInput.valueAsDate = start;
+            // Format to YYYY-MM-DD for input value
+            const formatDate = (date) => {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            };
+
+            endInput.value = formatDate(end);
+            startInput.value = formatDate(start);
         }
 
         // Fetch Data
@@ -1153,18 +1161,38 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/stats/token_usage');
             const data = await res.json();
 
-            // Filter by date range
+            // Parse dates
             const startDate = new Date(startInput.value);
             const endDate = new Date(endInput.value);
             // End date should be inclusive, set to end of day
-            endDate.setHours(23, 59, 59, 999);
+            const endDateInclusive = new Date(endDate);
+            endDateInclusive.setHours(23, 59, 59, 999);
 
-            const filteredData = data.filter(d => {
-                const date = new Date(d.date);
-                return date >= startDate && date <= endDate;
+            // Create a map of existing data
+            const dataMap = {};
+            data.forEach(d => {
+                dataMap[d.date] = d.total;
             });
 
-            renderChart(filteredData);
+            // Generate full date range with zero filling
+            const filledData = [];
+            let currentDate = new Date(startDate);
+
+            while (currentDate <= endDateInclusive) {
+                const y = currentDate.getFullYear();
+                const m = String(currentDate.getMonth() + 1).padStart(2, '0');
+                const d = String(currentDate.getDate()).padStart(2, '0');
+                const dateStr = `${y}-${m}-${d}`;
+
+                filledData.push({
+                    date: dateStr,
+                    total: dataMap[dateStr] || 0
+                });
+
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            renderChart(filledData);
         } catch (e) {
             console.error("Failed to load stats:", e);
         }
