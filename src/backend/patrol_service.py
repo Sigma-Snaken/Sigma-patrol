@@ -372,36 +372,69 @@ class PatrolService:
             # Generate Report
             if inspections_data:
                  try:
-                    report_prompt = "Generate a summary report for this patrol based on the following inspections:\n\n"
+                    custom_report_prompt = settings.get('report_prompt', '').strip()
+                    
+                    if custom_report_prompt:
+                         report_prompt = f"{custom_report_prompt}\n\n"
+                    else:
+                         report_prompt = "Generate a summary report for this patrol based on the following inspections:\n\n"
                     
                     for item in inspections_data:
                         report_prompt += f"- Point: {item['point']}\n  Result: {item['result']}\n\n"
-                    report_prompt += "Please provide a concise overview of the patrol status and any anomalies found."
+                    
+                    if not custom_report_prompt:
+                        report_prompt += "Please provide a concise overview of the patrol status and any anomalies found."
                     
                     report_response_obj = ai_service.generate_report(report_prompt)
                     
+                    # Calculate total tokens from inspections
+                    path_prompt_tokens = 0
+                    path_candidate_tokens = 0
+                    path_total_tokens = 0
+                    
+                    try:
+                        conn_sum = get_db_connection()
+                        cursor_sum = conn_sum.cursor()
+                        cursor_sum.execute(
+                            "SELECT SUM(prompt_tokens), SUM(candidate_tokens), SUM(total_tokens) FROM inspection_results WHERE run_id = ?", 
+                            (self.current_run_id,)
+                        )
+                        row = cursor_sum.fetchone()
+                        if row:
+                             path_prompt_tokens = row[0] if row[0] else 0
+                             path_candidate_tokens = row[1] if row[1] else 0
+                             path_total_tokens = row[2] if row[2] else 0
+                        conn_sum.close()
+                    except Exception as e:
+                        logger.error(f"Error summing tokens: {e}")
+
                     report_text = ""
                     report_usage_str = "{}"
-                    prompt_tokens = 0
-                    candidate_tokens = 0
-                    total_tokens = 0
+                    rep_prompt_tokens = 0
+                    rep_candidate_tokens = 0
+                    rep_total_tokens = 0
                     
                     if isinstance(report_response_obj, dict) and "result" in report_response_obj:
                          report_text = report_response_obj["result"]
                          usage_data = report_response_obj.get("usage", {})
                          report_usage_str = json.dumps(usage_data)
-                         prompt_tokens = usage_data.get("prompt_token_count", 0)
-                         candidate_tokens = usage_data.get("candidates_token_count", 0)
-                         total_tokens = usage_data.get("total_token_count", 0)
+                         rep_prompt_tokens = usage_data.get("prompt_token_count", 0)
+                         rep_candidate_tokens = usage_data.get("candidates_token_count", 0)
+                         rep_total_tokens = usage_data.get("total_token_count", 0)
                     else:
                          report_text = str(report_response_obj)
                          report_usage_str = "{}"
+                    
+                    # Grand Total
+                    final_prompt_tokens = path_prompt_tokens + rep_prompt_tokens
+                    final_candidate_tokens = path_candidate_tokens + rep_candidate_tokens
+                    final_total_tokens = path_total_tokens + rep_total_tokens
                     
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     cursor.execute(
                         'UPDATE patrol_runs SET report_content = ?, token_usage = ?, prompt_tokens = ?, candidate_tokens = ?, total_tokens = ? WHERE id = ?', 
-                        (report_text, report_usage_str, prompt_tokens, candidate_tokens, total_tokens, self.current_run_id)
+                        (report_text, report_usage_str, final_prompt_tokens, final_candidate_tokens, final_total_tokens, self.current_run_id)
                     )
                     conn.commit()
                     conn.close()

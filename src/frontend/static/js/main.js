@@ -62,10 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabName === 'patrol' && btns[0]) btns[0].classList.add('active');
         if (tabName === 'control' && btns[1]) btns[1].classList.add('active');
         if (tabName === 'history' && btns[2]) btns[2].classList.add('active');
-        if (tabName === 'settings' && btns[3]) btns[3].classList.add('active');
+        if (tabName === 'stats' && btns[3]) btns[3].classList.add('active');
+        if (tabName === 'settings' && btns[4]) btns[4].classList.add('active');
 
         // Load specific data
         if (tabName === 'history') loadHistory();
+        if (tabName === 'stats') loadStats();
         if (tabName === 'settings') loadSettings();
 
         // Reparent Map Container
@@ -515,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('setting-timezone').value = tz;
         currentSettingsTimezone = tz;
         document.getElementById('setting-role').value = data.system_prompt || '';
+        document.getElementById('setting-report-prompt').value = data.report_prompt || '';
 
         // Turbo Mode
         const turboCheckbox = document.getElementById('setting-turbo-mode');
@@ -531,6 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gemini_model: document.getElementById('setting-model').value,
             timezone: document.getElementById('setting-timezone').value,
             system_prompt: document.getElementById('setting-role').value,
+            report_prompt: document.getElementById('setting-report-prompt').value,
             turbo_mode: document.getElementById('setting-turbo-mode').checked,
             robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
         };
@@ -1036,8 +1040,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="display:flex; justify-content:space-between; font-size:0.9rem; color:#aaa;">
                         <span>Started: ${run.start_time}</span>
-                        <span>Robot: ${run.robot_serial || 'N/A'}</span>
+                        <span>Tokens: ${run.total_tokens || 0}</span>
                     </div>
+                    <!-- <span>Robot: ${run.robot_serial || 'N/A'}</span> -->
                     ${run.report_content ? `<div style="margin-top:10px; color:#ddd; font-size:0.9rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
                 `;
                 listContainer.appendChild(card);
@@ -1125,5 +1130,100 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target === modal) window.closeHistoryModal();
         });
     }
+
+    // --- STATS LOGIC ---
+    let tokenChart = null;
+
+    async function loadStats() {
+        // Initialize dates if empty
+        const startInput = document.getElementById('stats-start-date');
+        const endInput = document.getElementById('stats-end-date');
+
+        if (!startInput.value) {
+            const end = new Date();
+            const start = new Date();
+            start.setMonth(start.getMonth() - 1); // Last month
+
+            endInput.valueAsDate = end;
+            startInput.valueAsDate = start;
+        }
+
+        // Fetch Data
+        try {
+            const res = await fetch('/api/stats/token_usage');
+            const data = await res.json();
+
+            // Filter by date range
+            const startDate = new Date(startInput.value);
+            const endDate = new Date(endInput.value);
+            // End date should be inclusive, set to end of day
+            endDate.setHours(23, 59, 59, 999);
+
+            const filteredData = data.filter(d => {
+                const date = new Date(d.date);
+                return date >= startDate && date <= endDate;
+            });
+
+            renderChart(filteredData);
+        } catch (e) {
+            console.error("Failed to load stats:", e);
+        }
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('tokenUsageChart').getContext('2d');
+
+        if (tokenChart) {
+            tokenChart.destroy();
+        }
+
+        const labels = data.map(d => d.date);
+        const values = data.map(d => d.total);
+
+        tokenChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Token Usage',
+                    data: values,
+                    borderColor: '#26c6da',
+                    backgroundColor: 'rgba(38, 198, 218, 0.2)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: { color: '#aaa' },
+                        grid: { color: '#333' }
+                    },
+                    y: {
+                        ticks: { color: '#aaa' },
+                        grid: { color: '#333' },
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#fff' }
+                    }
+                }
+            }
+        });
+    }
+
+    // Date change listeners
+    if (document.getElementById('stats-start-date')) {
+        document.getElementById('stats-start-date').addEventListener('change', loadStats);
+        document.getElementById('stats-end-date').addEventListener('change', loadStats);
+    }
+
+    // Default
+    window.switchTab('control');
 
 });

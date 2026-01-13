@@ -272,13 +272,38 @@ def get_patrol_results():
     results.reverse()
     return jsonify(results)
 
+# --- Stats APIs ---
+
+@app.route('/api/stats/token_usage', methods=['GET'])
+def get_token_usage_stats():
+    # Optional filtering could be added here
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Aggregate total_tokens by day (YYYY-MM-DD)
+    # Ensure backward compatibility if total_tokens is NULL (use 0)
+    query = '''
+        SELECT substr(start_time, 1, 10) as date, SUM(COALESCE(total_tokens, 0))
+        FROM patrol_runs
+        WHERE start_time IS NOT NULL
+        GROUP BY substr(start_time, 1, 10)
+        ORDER BY date ASC
+    '''
+    
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = [{"date": row[0], "total": row[1]} for row in rows if row[0]]
+    return jsonify(results)
+
 # --- History APIs ---
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, start_time, end_time, status, robot_serial, report_content, model_id FROM patrol_runs ORDER BY id DESC')
+    cursor.execute('SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens FROM patrol_runs ORDER BY id DESC')
     rows = cursor.fetchall()
     conn.close()
     

@@ -114,6 +114,9 @@ class AIService:
 
         try:
             logger.info(f"Sending report generation request to Gemini (Model: {self.model_name})")
+            if not report_prompt:
+                 report_prompt = "Generate a summary report of the patrol." # Default fallback
+            
             response = self.model.generate_content(report_prompt)
             logger.info("Report response received.")
             
