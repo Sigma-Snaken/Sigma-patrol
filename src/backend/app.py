@@ -174,8 +174,12 @@ def test_ai_route():
 def handle_settings():
     if request.method == 'POST':
         new_settings = request.json
-        save_json(SETTINGS_FILE, new_settings)
-        return jsonify({"status": "saved"})
+        try:
+            save_json(SETTINGS_FILE, new_settings)
+            return jsonify({"status": "saved"})
+        except Exception as e:
+            logging.error(f"Failed to save settings: {e}")
+            return jsonify({"error": f"Failed to save settings: {str(e)}"}), 500
     else:
         return jsonify(load_json(SETTINGS_FILE, DEFAULT_SETTINGS))
 
@@ -188,7 +192,7 @@ def handle_points():
         new_point = request.json
         if 'id' not in new_point:
             new_point['id'] = str(int(time.time() * 1000))
-        
+
         updated = False
         for i, p in enumerate(points):
             if p.get('id') == new_point.get('id'):
@@ -197,22 +201,34 @@ def handle_points():
                 break
         if not updated:
             points.append(new_point)
-            
-        save_json(POINTS_FILE, points)
-        return jsonify({"status": "saved", "id": new_point['id']})
-    
+
+        try:
+            save_json(POINTS_FILE, points)
+            return jsonify({"status": "saved", "id": new_point['id']})
+        except Exception as e:
+            logging.error(f"Failed to save points: {e}")
+            return jsonify({"error": f"Failed to save points: {str(e)}"}), 500
+
     elif request.method == 'DELETE':
         point_id = request.args.get('id')
         points = [p for p in points if p.get('id') != point_id]
-        save_json(POINTS_FILE, points)
-        return jsonify({"status": "deleted"})
+        try:
+            save_json(POINTS_FILE, points)
+            return jsonify({"status": "deleted"})
+        except Exception as e:
+            logging.error(f"Failed to delete point: {e}")
+            return jsonify({"error": f"Failed to delete point: {str(e)}"}), 500
 
 @app.route('/api/points/reorder', methods=['POST'])
 def reorder_points():
     new_points = request.json
     if isinstance(new_points, list):
-        save_json(POINTS_FILE, new_points)
-        return jsonify({"status": "reordered"})
+        try:
+            save_json(POINTS_FILE, new_points)
+            return jsonify({"status": "reordered"})
+        except Exception as e:
+            logging.error(f"Failed to reorder points: {e}")
+            return jsonify({"error": f"Failed to reorder points: {str(e)}"}), 500
     return jsonify({"error": "Invalid format, expected list"}), 400
 
 @app.route('/api/points/export', methods=['GET'])

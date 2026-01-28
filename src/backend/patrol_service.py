@@ -25,38 +25,62 @@ class PatrolService:
         self.current_patrol_index = -1
         self.current_run_id = None
         self.patrol_lock = threading.Lock()
-        
+        self.state_lock = threading.Lock()  # Separate lock for state reads
+        self.patrol_thread = None  # Track patrol thread for proper cleanup
+
         self.inspection_queue = queue.Queue()
         threading.Thread(target=self._inspection_worker, daemon=True).start()
 
     def get_status(self):
-        return {
-            "is_patrolling": self.is_patrolling,
-            "status": self.patrol_status,
-            "current_index": self.current_patrol_index
-        }
+        with self.state_lock:
+            return {
+                "is_patrolling": self.is_patrolling,
+                "status": self.patrol_status,
+                "current_index": self.current_patrol_index
+            }
+
+    def _set_status(self, status):
+        """Thread-safe status update"""
+        with self.state_lock:
+            self.patrol_status = status
+
+    def _set_patrol_index(self, index):
+        """Thread-safe patrol index update"""
+        with self.state_lock:
+            self.current_patrol_index = index
 
     def start_patrol(self):
         with self.patrol_lock:
             if self.is_patrolling:
                 logger.warning("Attempted to start patrol while already running.")
                 return False, "Already patrolling"
+            # Wait for previous patrol thread to finish if still running
+            if self.patrol_thread and self.patrol_thread.is_alive():
+                logger.warning("Previous patrol thread still running, waiting...")
+                self.patrol_thread.join(timeout=5)
             self.is_patrolling = True
-        
+            with self.state_lock:
+                self.current_patrol_index = -1
+                self.current_run_id = None
+
         logger.info("Starting patrol...")
-        threading.Thread(target=self._patrol_logic, daemon=True).start()
+        self.patrol_thread = threading.Thread(target=self._patrol_logic, daemon=True)
+        self.patrol_thread.start()
         return True, "Started"
 
     def stop_patrol(self):
         with self.patrol_lock:
+            was_patrolling = self.is_patrolling
             self.is_patrolling = False
-            self.patrol_status = "Stopping..."
-        
-        logger.info("Stop patrol requested.")
-        robot_service.cancel_command()
-        logger.info("Command cancelled.")
-        robot_service.return_home()
-        logger.info("Returning home.")
+            with self.state_lock:
+                self.patrol_status = "Stopping..."
+
+        if was_patrolling:
+            logger.info("Stop patrol requested.")
+            robot_service.cancel_command()
+            logger.info("Command cancelled.")
+            robot_service.return_home()
+            logger.info("Returning home.")
         return True
 
     def _inspection_worker(self):
@@ -129,19 +153,24 @@ class PatrolService:
                     logger.error(f"Worker Rename Error for {point_name}: {e}")
 
                 # Save Result to DB
+                conn = None
                 try:
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     cursor.execute(
-                        '''INSERT INTO inspection_results 
-                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
+                        '''INSERT INTO inspection_results
+                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                         (run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, image_path.replace(os.path.join(IMAGES_DIR, ""), "").lstrip('/'), get_current_time_str(), "Success")
                     )
                     conn.commit()
-                    conn.close()
                 except Exception as e:
                     logger.error(f"Worker DB Error for {point_name}: {e}")
+                    if conn:
+                        conn.rollback()
+                finally:
+                    if conn:
+                        conn.close()
 
                 results_list.append({
                     "point": point_name,
@@ -156,39 +185,51 @@ class PatrolService:
                 self.inspection_queue.task_done()
 
     def _patrol_logic(self):
-        self.patrol_status = "Starting..."
+        self._set_status("Starting...")
         points = load_json(POINTS_FILE, [])
         settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
-        
+
         # Check AI config
         if not ai_service.is_configured():
-             self.patrol_status = "Error: AI Not Configured (API Key?)"
-             logger.error("Patrol started but AI not configured.")
-             self.is_patrolling = False
-             return
-        
+            self._set_status("Error: AI Not Configured (API Key?)")
+            logger.error("Patrol started but AI not configured.")
+            with self.patrol_lock:
+                self.is_patrolling = False
+            return
+
         model_name = ai_service.get_model_name()
         logger.info(f"Patrol using model: {model_name}")
 
         to_patrol = [p for p in points if p.get('enabled', True)]
-        
+
         if not to_patrol:
-            self.patrol_status = "No enabled points"
+            self._set_status("No enabled points")
             logger.warning("Patrol started but no points enabled.")
-            self.is_patrolling = False
+            with self.patrol_lock:
+                self.is_patrolling = False
             return
 
         # Start DB Record
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'INSERT INTO patrol_runs (start_time, status, robot_serial, model_id) VALUES (?, ?, ?, ?)',
-            (get_current_time_str(), "Running", robot_service.get_serial(), model_name)
-        )
-        self.current_run_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO patrol_runs (start_time, status, robot_serial, model_id) VALUES (?, ?, ?, ?)',
+                (get_current_time_str(), "Running", robot_service.get_serial(), model_name)
+            )
+            with self.state_lock:
+                self.current_run_id = cursor.lastrowid
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to create patrol run record: {e}")
+            self._set_status("Error: Database Error")
+            with self.patrol_lock:
+                self.is_patrolling = False
+            return
+        finally:
+            if conn:
+                conn.close()
         logger.info(f"Patrol Run ID: {self.current_run_id} started with {len(to_patrol)} points.")
         
         # Create Run Folder
@@ -200,12 +241,13 @@ class PatrolService:
         inspections_data = []
 
         for i, point in enumerate(to_patrol):
-            if not self.is_patrolling:
-                break
-                
-            self.current_patrol_index = i
+            with self.patrol_lock:
+                if not self.is_patrolling:
+                    break
+
+            self._set_patrol_index(i)
             point_name = point.get('name', 'Unknown')
-            self.patrol_status = f"Moving to {point_name}..."
+            self._set_status(f"Moving to {point_name}...")
             logger.info(f"Moving to point {i+1}/{len(to_patrol)}: {point_name}")
             
             # Move
@@ -227,7 +269,7 @@ class PatrolService:
                             # Try to get error code
                             error_code = getattr(result, 'error_code', 'Unknown')
                             move_status = f"Error: {error_code}"
-                            self.patrol_status = f"Move Failed: {move_status}"
+                            self._set_status(f"Move Failed: {move_status}")
                             logger.warning(f"Move failed for {point_name}: {move_status}")
                     else:
                         move_status = "Error: No Result"
@@ -235,37 +277,44 @@ class PatrolService:
 
                 except Exception as e:
                     move_status = f"Error: {e}"
-                    self.patrol_status = f"Move Error: {e}"
+                    self._set_status(f"Move Error: {e}")
                     logger.error(f"Patrol Move Error for {point_name}: {e}")
             else:
-                 move_status = "Error: Disconnected"
-                 logger.error("Robot service not connected during patrol.")
+                move_status = "Error: Disconnected"
+                logger.error("Robot service not connected during patrol.")
             
             # Check move status
             if move_status != "Success":
+                conn = None
                 try:
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     cursor.execute(
-                        '''INSERT INTO inspection_results 
-                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
+                        '''INSERT INTO inspection_results
+                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                         (self.current_run_id, point_name, point.get('x'), point.get('y'), "", "Move Failed", 1, move_status, "{}", 0, 0, 0, "", get_current_time_str(), move_status)
                     )
                     conn.commit()
-                    conn.close()
                 except Exception as db_e:
                     logger.error(f"DB Error saving move failure for {point_name}: {db_e}")
-                
+                    if conn:
+                        conn.rollback()
+                finally:
+                    if conn:
+                        conn.close()
+
                 # Continue specific request: "Once ... receives error or success ... can execute next action"
                 # If error, we logged it and saved to DB. User usually implies skipping inspection if move failed.
                 time.sleep(1)
                 continue
-            
-            if not self.is_patrolling: break
+
+            with self.patrol_lock:
+                if not self.is_patrolling:
+                    break
 
             # Inspect
-            self.patrol_status = f"Inspecting {point_name}..."
+            self._set_status(f"Inspecting {point_name}...")
             # logger.info(f"Inspecting {point_name}")
             time.sleep(2)
             
@@ -331,21 +380,30 @@ class PatrolService:
                             new_full_path = os.path.join(run_images_dir, new_filename)
                             os.rename(img_full_path, new_full_path)
                             img_full_path = new_full_path
-                        except: pass
-                        
+                        except OSError as rename_err:
+                            logger.warning(f"Failed to rename image for {point_name}: {rename_err}")
+
                         img_path_rel = os.path.relpath(img_full_path, IMAGES_DIR)
-                        
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute(
-                        '''INSERT INTO inspection_results 
-                           (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (self.current_run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, img_path_rel, get_current_time_str(), "Success")
-                        )
-                        conn.commit()
-                        conn.close()
-                        
+
+                        conn = None
+                        try:
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                '''INSERT INTO inspection_results
+                                   (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response, is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens, total_tokens, image_path, timestamp, robot_moving_status)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (self.current_run_id, point_name, point.get('x'), point.get('y'), user_prompt, result_text, is_ng_val, ai_description, token_usage_str, prompt_tokens, candidate_tokens, total_tokens, img_path_rel, get_current_time_str(), "Success")
+                            )
+                            conn.commit()
+                        except Exception as db_err:
+                            logger.error(f"DB Error saving inspection for {point_name}: {db_err}")
+                            if conn:
+                                conn.rollback()
+                        finally:
+                            if conn:
+                                conn.close()
+
                         inspections_data.append({
                             "point": point_name,
                             "result": result_text
@@ -353,110 +411,134 @@ class PatrolService:
 
             except Exception as e:
                 logger.error(f"Patrol Inspection Error at {point_name}: {e}")
-                self.patrol_status = f"Error at {point_name}"
+                self._set_status(f"Error at {point_name}")
                 time.sleep(2)
 
-        # End
-        final_status = "Patrol Stopped"
-        if self.is_patrolling:
-            final_status = "Completed"
-            if settings.get('turbo_mode', False):
-                self.patrol_status = "Processing Images..."
-                logger.info("Waiting for inspection queue to finish...")
-                self.inspection_queue.join()
-                logger.info("Inspection queue finished.")
-            
-            self.patrol_status = "Patrol Complete. Generating Report..."
+        # End - always wait for pending inspections in turbo mode
+        if settings.get('turbo_mode', False):
+            self._set_status("Processing Images...")
+            logger.info("Waiting for inspection queue to finish...")
+            self.inspection_queue.join()
+            logger.info("Inspection queue finished.")
+
+        # Determine final status
+        with self.patrol_lock:
+            was_patrolling = self.is_patrolling
+        final_status = "Completed" if was_patrolling else "Patrol Stopped"
+
+        if was_patrolling:
+            self._set_status("Patrol Complete. Generating Report...")
             logger.info("Generating Final Report...")
-            
+
             # Generate Report
             if inspections_data:
-                 try:
+                try:
                     custom_report_prompt = settings.get('report_prompt', '').strip()
-                    
+
                     if custom_report_prompt:
-                         report_prompt = f"{custom_report_prompt}\n\n"
+                        report_prompt = f"{custom_report_prompt}\n\n"
                     else:
-                         report_prompt = "Generate a summary report for this patrol based on the following inspections:\n\n"
-                    
+                        report_prompt = "Generate a summary report for this patrol based on the following inspections:\n\n"
+
                     for item in inspections_data:
                         report_prompt += f"- Point: {item['point']}\n  Result: {item['result']}\n\n"
-                    
+
                     if not custom_report_prompt:
                         report_prompt += "Please provide a concise overview of the patrol status and any anomalies found."
-                    
+
                     report_response_obj = ai_service.generate_report(report_prompt)
-                    
+
                     # Calculate total tokens from inspections
                     path_prompt_tokens = 0
                     path_candidate_tokens = 0
                     path_total_tokens = 0
-                    
+
+                    conn_sum = None
                     try:
                         conn_sum = get_db_connection()
                         cursor_sum = conn_sum.cursor()
                         cursor_sum.execute(
-                            "SELECT SUM(prompt_tokens), SUM(candidate_tokens), SUM(total_tokens) FROM inspection_results WHERE run_id = ?", 
+                            "SELECT SUM(prompt_tokens), SUM(candidate_tokens), SUM(total_tokens) FROM inspection_results WHERE run_id = ?",
                             (self.current_run_id,)
                         )
                         row = cursor_sum.fetchone()
                         if row:
-                             path_prompt_tokens = row[0] if row[0] else 0
-                             path_candidate_tokens = row[1] if row[1] else 0
-                             path_total_tokens = row[2] if row[2] else 0
-                        conn_sum.close()
+                            path_prompt_tokens = row[0] if row[0] else 0
+                            path_candidate_tokens = row[1] if row[1] else 0
+                            path_total_tokens = row[2] if row[2] else 0
                     except Exception as e:
                         logger.error(f"Error summing tokens: {e}")
+                    finally:
+                        if conn_sum:
+                            conn_sum.close()
 
                     report_text = ""
                     report_usage_str = "{}"
                     rep_prompt_tokens = 0
                     rep_candidate_tokens = 0
                     rep_total_tokens = 0
-                    
+
                     if isinstance(report_response_obj, dict) and "result" in report_response_obj:
-                         report_text = report_response_obj["result"]
-                         usage_data = report_response_obj.get("usage", {})
-                         report_usage_str = json.dumps(usage_data)
-                         rep_prompt_tokens = usage_data.get("prompt_token_count", 0)
-                         rep_candidate_tokens = usage_data.get("candidates_token_count", 0)
-                         rep_total_tokens = usage_data.get("total_token_count", 0)
+                        report_text = report_response_obj["result"]
+                        usage_data = report_response_obj.get("usage", {})
+                        report_usage_str = json.dumps(usage_data)
+                        rep_prompt_tokens = usage_data.get("prompt_token_count", 0)
+                        rep_candidate_tokens = usage_data.get("candidates_token_count", 0)
+                        rep_total_tokens = usage_data.get("total_token_count", 0)
                     else:
-                         report_text = str(report_response_obj)
-                         report_usage_str = "{}"
-                    
+                        report_text = str(report_response_obj)
+                        report_usage_str = "{}"
+
                     # Grand Total
                     final_prompt_tokens = path_prompt_tokens + rep_prompt_tokens
                     final_candidate_tokens = path_candidate_tokens + rep_candidate_tokens
                     final_total_tokens = path_total_tokens + rep_total_tokens
-                    
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        'UPDATE patrol_runs SET report_content = ?, token_usage = ?, prompt_tokens = ?, candidate_tokens = ?, total_tokens = ? WHERE id = ?', 
-                        (report_text, report_usage_str, final_prompt_tokens, final_candidate_tokens, final_total_tokens, self.current_run_id)
-                    )
-                    conn.commit()
-                    conn.close()
-                    logger.info("Report generated and saved.")
-                 except Exception as e:
-                     logger.error(f"Report Generation Error: {e}")
 
-            self.patrol_status = "Returning Home..."
+                    conn = None
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            'UPDATE patrol_runs SET report_content = ?, token_usage = ?, prompt_tokens = ?, candidate_tokens = ?, total_tokens = ? WHERE id = ?',
+                            (report_text, report_usage_str, final_prompt_tokens, final_candidate_tokens, final_total_tokens, self.current_run_id)
+                        )
+                        conn.commit()
+                    except Exception as db_err:
+                        logger.error(f"DB Error saving report: {db_err}")
+                        if conn:
+                            conn.rollback()
+                    finally:
+                        if conn:
+                            conn.close()
+                    logger.info("Report generated and saved.")
+                except Exception as e:
+                    logger.error(f"Report Generation Error: {e}")
+
+            self._set_status("Returning Home...")
             logger.info("Returning to charging station.")
             robot_service.return_home()
             time.sleep(2)
-            self.patrol_status = "Finished"
+            self._set_status("Finished")
 
         # Update Run Status
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE patrol_runs SET end_time = ?, status = ? WHERE id = ?', 
-                    (get_current_time_str(), final_status, self.current_run_id))
-        conn.commit()
-        conn.close()
-        
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('UPDATE patrol_runs SET end_time = ?, status = ? WHERE id = ?',
+                           (get_current_time_str(), final_status, self.current_run_id))
+            conn.commit()
+        except Exception as db_err:
+            logger.error(f"DB Error updating patrol run status: {db_err}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
         logger.info(f"Patrol Run {self.current_run_id} finished with status: {final_status}")
-        self.is_patrolling = False
+        with self.patrol_lock:
+            self.is_patrolling = False
+
 
 patrol_service = PatrolService()

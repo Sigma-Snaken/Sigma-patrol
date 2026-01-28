@@ -7,20 +7,21 @@ from utils import load_json
 class RobotService:
     def __init__(self):
         self.client = None
+        self.client_lock = threading.Lock()  # Lock for client access (TOCTOU fix)
         self.state_lock = threading.Lock()
         self.robot_state = {
             "battery": 0,
             "pose": {"x": 0.0, "y": 0.0, "theta": 0.0},
             "map_info": {
-                "resolution": 0.05, 
-                "width": 0, 
-                "height": 0, 
-                "origin_x": 0.0, 
+                "resolution": 0.05,
+                "width": 0,
+                "height": 0,
+                "origin_x": 0.0,
                 "origin_y": 0.0
             },
         }
         self.map_image_bytes = None
-        
+
         # Start background polling
         self.polling_thread = threading.Thread(target=self._polling_loop, daemon=True)
         self.polling_thread.start()
@@ -28,32 +29,44 @@ class RobotService:
     def connect(self):
         settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
         target_ip = settings.get("robot_ip", ROBOT_IP)
-        
+
         try:
-            self.client = kachaka_api.KachakaApiClient(target_ip)
-            self.client.get_robot_serial_number()
+            new_client = kachaka_api.KachakaApiClient(target_ip)
+            new_client.get_robot_serial_number()
+            with self.client_lock:
+                self.client = new_client
             print(f"Connected to Kachaka at {target_ip}")
             return True
         except Exception as e:
             print(f"Failed to connect to Kachaka at {target_ip}: {e}")
-            self.client = None
+            with self.client_lock:
+                self.client = None
             return False
 
     def get_client(self):
-        return self.client
+        with self.client_lock:
+            return self.client
 
     def _polling_loop(self):
         while True:
-            if not self.client:
+            with self.client_lock:
+                current_client = self.client
+
+            if not current_client:
                 self.connect()
-                if not self.client:
+                with self.client_lock:
+                    current_client = self.client
+                if not current_client:
                     time.sleep(2)
                     continue
 
             # Fetch map if missing
-            if self.map_image_bytes is None:
+            with self.state_lock:
+                map_missing = self.map_image_bytes is None
+
+            if map_missing:
                 try:
-                    png_map = self.client.get_png_map()
+                    png_map = current_client.get_png_map()
                     with self.state_lock:
                         self.map_image_bytes = png_map.data
                         self.robot_state["map_info"].update({
@@ -63,14 +76,14 @@ class RobotService:
                             "origin_x": png_map.origin.x,
                             "origin_y": png_map.origin.y
                         })
-                except Exception:
-                    pass
-            
+                except Exception as e:
+                    print(f"Error fetching map: {e}")
+
             # Poll status
             try:
-                pose = self.client.get_robot_pose()
-                battery = self.client.get_battery_info()
-                
+                pose = current_client.get_robot_pose()
+                battery = current_client.get_battery_info()
+
                 with self.state_lock:
                     actual_pose = getattr(pose, 'pose', pose)
                     self.robot_state["pose"].update({
@@ -80,15 +93,18 @@ class RobotService:
                     })
 
                     if isinstance(battery, tuple) and len(battery) > 0:
-                         self.robot_state["battery"] = int(battery[0])
+                        self.robot_state["battery"] = int(battery[0])
                     elif hasattr(battery, 'percentage'):
                         self.robot_state["battery"] = int(battery.percentage)
                     else:
                         self.robot_state["battery"] = int(battery) if isinstance(battery, (int, float)) else 0
-                        
-            except Exception:
-                pass
-            
+
+            except Exception as e:
+                print(f"Error polling robot state: {e}")
+                # Reset client on persistent errors to trigger reconnect
+                with self.client_lock:
+                    self.client = None
+
             time.sleep(0.1)
 
     def get_state(self):
@@ -96,42 +112,59 @@ class RobotService:
             return self.robot_state.copy()
 
     def get_map_bytes(self):
-        return self.map_image_bytes
+        with self.state_lock:
+            return self.map_image_bytes
 
     def move_to(self, x, y, theta, wait=True):
-        if self.client:
-            return self.client.move_to_pose(x, y, theta, wait_for_completion=wait)
+        with self.client_lock:
+            client = self.client
+        if client:
+            return client.move_to_pose(x, y, theta, wait_for_completion=wait)
         return None
-        
+
     def move_forward(self, distance, speed=0.1):
-         if self.client:
-            self.client.move_forward(distance_meter=distance, speed=speed)
+        with self.client_lock:
+            client = self.client
+        if client:
+            client.move_forward(distance_meter=distance, speed=speed)
 
     def rotate(self, angle):
-        if self.client:
-            self.client.rotate_in_place(angle_radian=angle)
+        with self.client_lock:
+            client = self.client
+        if client:
+            client.rotate_in_place(angle_radian=angle)
 
     def return_home(self):
-        if self.client:
-            self.client.return_home()
-            
+        with self.client_lock:
+            client = self.client
+        if client:
+            client.return_home()
+
     def cancel_command(self):
-        if self.client:
-            self.client.cancel_command()
+        with self.client_lock:
+            client = self.client
+        if client:
+            client.cancel_command()
 
     def get_front_camera_image(self):
-        if self.client:
-             return self.client.get_front_camera_ros_compressed_image()
+        with self.client_lock:
+            client = self.client
+        if client:
+            return client.get_front_camera_ros_compressed_image()
         return None
 
     def get_back_camera_image(self):
-        if self.client:
-             return self.client.get_back_camera_ros_compressed_image()
+        with self.client_lock:
+            client = self.client
+        if client:
+            return client.get_back_camera_ros_compressed_image()
         return None
-        
+
     def get_serial(self):
-        if self.client:
-            return self.client.get_robot_serial_number()
+        with self.client_lock:
+            client = self.client
+        if client:
+            return client.get_robot_serial_number()
         return "unknown"
 
 # Singleton instance

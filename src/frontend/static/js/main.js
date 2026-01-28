@@ -538,13 +538,22 @@ document.addEventListener('DOMContentLoaded', () => {
             turbo_mode: document.getElementById('setting-turbo-mode').checked,
             robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
         };
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings)
-        });
-        currentSettingsTimezone = settings.timezone;
-        alert('Settings Saved! (Robot connection may reload)');
+        try {
+            const res = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                alert('Failed to save settings: ' + (data.error || 'Unknown error'));
+                return;
+            }
+            currentSettingsTimezone = settings.timezone;
+            alert('Settings Saved! (Robot connection may reload)');
+        } catch (e) {
+            alert('Failed to save settings: ' + e.message);
+        }
     }
 
     function startClock() {
@@ -844,18 +853,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const point = currentPatrolPoints.find(p => p.id === id);
         if (!point) return;
         point[key] = value;
-        await fetch('/api/points', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(point)
-        });
-        // loadPoints(); // No need to reload entire list, just update local?
+        try {
+            const res = await fetch('/api/points', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(point)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                alert('Failed to save point: ' + (data.error || 'Unknown error'));
+                loadPoints(); // Reload to restore original values
+            }
+        } catch (e) {
+            alert('Failed to save point: ' + e.message);
+            loadPoints(); // Reload to restore original values
+        }
     };
 
     window.deletePoint = async function (id) {
         // Removed confirm for smoother UX as requested
         // if (!confirm('Delete point?')) return;
-        await fetch(`/api/points?id=${id}`, { method: 'DELETE' });
+        try {
+            const res = await fetch(`/api/points?id=${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                alert('Failed to delete point: ' + (data.error || 'Unknown error'));
+                return;
+            }
+        } catch (e) {
+            alert('Failed to delete point: ' + e.message);
+            return;
+        }
         loadPoints();
     };
 
