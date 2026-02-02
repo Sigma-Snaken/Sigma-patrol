@@ -4,142 +4,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sigma Single Robot Patrol with Gemini</title>
+    <title>SIGMA PATROL // Command Center</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 </head>
 
 <body>
     <div class="app-container">
+        <!-- ═══════════════════════════════════════════════════════════════════
+             HEADER / COMMAND BAR
+             ═══════════════════════════════════════════════════════════════════ -->
         <header class="glass-header">
-            <div class="logo">SIGMA SINGLE ROBOT PATROL WITH GEMINI</div>
+            <div class="logo">SIGMA PATROL</div>
 
-            <div class="tabs" style="position: absolute; left: 50%; transform: translateX(-50%);margin:0;">
-                <button class="tab-btn" onclick="switchTab('patrol')">巡邏</button>
-                <button class="tab-btn active" onclick="switchTab('control')">檢測設定</button>
-                <button class="tab-btn" onclick="switchTab('history')">歷史紀錄</button>
-                <button class="tab-btn" onclick="switchTab('stats')">統計</button>
-                <button class="tab-btn" onclick="switchTab('settings')">系統設定</button>
+            <div class="tabs">
+                <button class="tab-btn" onclick="switchTab('patrol')">Patrol</button>
+                <button class="tab-btn active" onclick="switchTab('control')">Control</button>
+                <button class="tab-btn" onclick="switchTab('history')">History</button>
+                <button class="tab-btn" onclick="switchTab('stats')">Stats</button>
+                <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
             </div>
 
             <div class="status-bar">
                 <span class="status-item">
-                    <span class="label">BATTERY</span>
+                    <span class="label">Battery</span>
                     <span class="value" id="battery-value">--%</span>
                 </span>
                 <span class="status-item">
-                    <span class="label">TIME</span>
+                    <span class="label">Time</span>
                     <span class="value" id="time-value">--:--</span>
                 </span>
-                <div class="connection-light" id="connection-status"></div>
+                <div class="connection-light" id="connection-status" title="Connection Status"></div>
             </div>
         </header>
 
+        <!-- ═══════════════════════════════════════════════════════════════════
+             MAIN CONTENT
+             ═══════════════════════════════════════════════════════════════════ -->
         <main class="main-content">
-            <!-- Tabs moved to header -->
 
-            <!-- CONTROL VIEW -->
-            <div id="view-control" class="tab-content no-padding" style="padding-top: 60px;">
-                <!-- Custom padding handling -->
-
+            <!-- ═══════════════════════════════════════════════════════════════
+                 CONTROL VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-control" class="tab-content no-padding">
                 <div class="split-view">
                     <!-- LEFT: MAP -->
                     <div class="left-panel">
                         <div class="map-container" id="map-container">
                             <div class="loading-overlay" id="map-loading">
                                 <div class="spinner"></div>
-                                <p>Loading Map...</p>
+                                <p>Initializing Map</p>
                             </div>
                             <canvas id="map-canvas"></canvas>
                         </div>
 
-                        <!-- Float Controls on Map -->
+                        <!-- Controls Panel -->
                         <div class="controls-panel">
-                            <div
-                                style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 10px;">
-                                <div style="display: flex; flex: 1; gap: 5px; margin-right: 15px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 16px;">
+                                <div style="display: flex; flex: 1; gap: 8px;">
                                     <button id="btn-home" class="btn-premium" style="flex: 1;">
-                                        <span class="icon">🏠</span> Return Home
+                                        <span class="icon">⌂</span> Return Home
                                     </button>
-                                    <button id="btn-cancel-command" class="btn-danger"
-                                        style="flex: 0 0 auto; padding: 0 15px;" title="Stop Moving">
-                                        <span class="icon">⏹</span>
+                                    <button id="btn-cancel-command" class="btn-danger" style="flex: 0 0 auto; padding: 0 16px;" title="Emergency Stop">
+                                        <span class="icon">■</span>
                                     </button>
                                 </div>
                                 <div class="d-pad">
-                                    <button class="up" onclick="manualControl('forward')"
-                                        title="Forward 0.1m">▲</button>
-                                    <button class="left" onclick="manualControl('left')" title="Let 10°">◀</button>
-                                    <button class="down" onclick="manualControl('backward')"
-                                        title="Backward 0.1m">▼</button>
+                                    <button class="up" onclick="manualControl('forward')" title="Forward 0.1m">▲</button>
+                                    <button class="left" onclick="manualControl('left')" title="Left 10°">◀</button>
+                                    <button class="down" onclick="manualControl('backward')" title="Backward 0.1m">▼</button>
                                     <button class="right" onclick="manualControl('right')" title="Right 10°">▶</button>
                                 </div>
                             </div>
                             <div class="info-text">
                                 <p>Click to Move • Drag to Set Pose</p>
-                                <p id="pose-display">X: -- Y: -- T: --</p>
+                                <p id="pose-display">X: -- Y: -- θ: --</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- RIGHT: CAMERA, AI, POINTS -->
                     <div class="right-panel">
-                        <div class="header" style="padding: 0; text-align: left;">
-                            <h2 style="margin:0;">Control & Monitor</h2>
+                        <div class="header">
+                            <h2>Control & Monitor</h2>
                         </div>
 
-                        <!-- Camera -->
-                        <div class="camera-section">
-                            <h3 style="margin:0; align-self: flex-start;">Front Camera</h3>
-                            <img src="/api/camera/front" width="320" height="240"
-                                style="background: #333; border-radius: 8px; width: 100%; height: auto; max-width: 480px;" />
-                        </div>
-
-                        <!-- AI Test -->
-                        <div class="ai-test-section">
-                            <h3 style="margin:0 0 10px 0;">AI Recognition Test</h3>
-                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                                <input type="text" id="ai-test-prompt-input"
-                                    placeholder="Enter prompt here (e.g. 'Is there a fire?')"
-                                    style="flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #555; background: rgba(0,0,0,0.3); color: white;">
-                                <button id="btn-test-ai" class="btn-premium" style="width: auto; padding: 0 20px;">
-                                    <span class="icon">🤖</span> Test
-                                </button>
+                        <!-- Camera Feed (Collapsible) -->
+                        <div class="monitor-frame collapsible" id="front-camera-frame">
+                            <div class="frame-header" onclick="toggleFrontCameraPanel()">
+                                <h4>Front Camera <span id="front-camera-toggle" class="toggle-icon">▼</span></h4>
                             </div>
-
-                            <div class="ai-output-container"
-                                style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px; font-size: 0.9rem;">
-                                <div style="margin-bottom: 5px;">
-                                    <span style="color: #26c6da; font-weight: bold;">PROMPT:</span>
-                                    <span id="ai-output-prompt" style="color: #aaa; font-style: italic;">-</span>
-                                </div>
-                                <div>
-                                    <span style="color: #00e676; font-weight: bold;">RESULT:</span>
-                                    <div id="ai-output-result"
-                                        style="color: #e0e0e0; white-space: pre-wrap; margin-top: 5px; padding-left: 10px; border-left: 2px solid #555;">
-                                        -</div>
-                                </div>
+                            <div class="frame-content" id="front-camera-content">
+                                <img src="/api/camera/front" alt="Robot Camera Feed" style="width: 100%; display: block;" />
                             </div>
                         </div>
 
-                        <!-- Quick Points -->
-                        <div class="points-section">
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <h3 style="margin:0;">Patrol Points</h3>
-                                <div style="display:flex; gap:5px;">
-                                    <button id="btn-save-points"
-                                        style="padding: 5px 15px; font-size: 0.8rem; background: #00e676; color: black; font-weight: bold; border: none; border-radius: 4px; box-shadow: 0 0 8px rgba(0,230,118,0.6); cursor: pointer; margin-right: 5px;">SAVE</button>
-                                    <button class="btn-secondary" id="btn-export-points"
-                                        style="padding: 5px 10px; font-size: 0.8rem;">Export</button>
-                                    <button class="btn-secondary" id="btn-import-points"
-                                        style="padding: 5px 10px; font-size: 0.8rem;">Import</button>
-                                    <button class="btn-secondary" id="btn-add-point-quick"
-                                        style="padding: 5px 10px; font-size: 0.8rem;">+ Add Here</button>
+                        <!-- AI Test Section (Collapsible) -->
+                        <div class="monitor-frame collapsible" id="ai-test-frame">
+                            <div class="frame-header" onclick="toggleAITestPanel()">
+                                <h4>AI Recognition Test <span id="ai-test-toggle" class="toggle-icon">▼</span></h4>
+                            </div>
+                            <div class="frame-content" id="ai-test-content">
+                                <div style="display: flex; gap: 8px; padding: 12px;">
+                                    <input type="text" id="ai-test-prompt-input"
+                                        placeholder="Enter prompt (e.g. 'Is there a fire?')"
+                                        style="flex: 1;">
+                                    <button id="btn-test-ai" class="btn-premium" style="width: auto; padding: 10px 20px;">
+                                        <span class="icon">◉</span> Test
+                                    </button>
+                                </div>
+
+                                <div class="ai-output-container">
+                                    <div style="margin-bottom: 8px;">
+                                        <span style="color: var(--cyan-dim); font-weight: 600; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Prompt:</span>
+                                        <span id="ai-output-prompt" style="color: var(--text-muted); font-style: italic; margin-left: 8px;">-</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: var(--green-ok); font-weight: 600; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Result:</span>
+                                        <div id="ai-output-result" style="margin-top: 8px;">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Patrol Points Section (Collapsible) -->
+                        <div class="monitor-frame collapsible" id="patrol-points-frame">
+                            <div class="frame-header" onclick="togglePatrolPointsPanel()" style="display: flex; justify-content: space-between; align-items: center;">
+                                <h4>Patrol Points <span id="patrol-points-toggle" class="toggle-icon">▼</span></h4>
+                                <div style="display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
+                                    <button id="btn-save-points">SAVE</button>
+                                    <button class="btn-secondary" id="btn-get-robot-locations" title="Import locations from robot">
+                                        <span style="font-size: 12px;">🤖</span> From Robot
+                                    </button>
+                                    <button class="btn-secondary" id="btn-export-points">Export</button>
+                                    <button class="btn-secondary" id="btn-import-points">Import</button>
+                                    <button class="btn-secondary" id="btn-add-point-quick">+ Add Here</button>
                                 </div>
                                 <input type="file" id="import-file-input" style="display:none" accept=".json">
                             </div>
-                            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                            <div class="frame-content" id="patrol-points-content">
                                 <table class="data-table" id="points-table-quick">
                                     <thead>
                                         <tr>
@@ -152,83 +155,99 @@
                                     <tbody></tbody>
                                 </table>
                             </div>
-                            <!-- Removed the 'Manage Full Patrol' button as requested functionality is now here -->
-
                         </div>
-
                     </div>
                 </div>
             </div>
 
-            <!-- PATROL VIEW -->
-            <div id="view-patrol" class="tab-content no-padding" style="padding-top: 60px; display: none;">
+            <!-- ═══════════════════════════════════════════════════════════════
+                 PATROL VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-patrol" class="tab-content no-padding" style="display: none;">
                 <div class="split-view">
-                    <!-- LEFT: CAMERA + MAP -->
+                    <!-- LEFT: MAP + AI ANALYSIS -->
                     <div class="left-panel" id="patrol-left-panel">
-                        <!-- Camera -->
-                        <div class="camera-section">
-                            <h4 style="margin: 0 0 5px 0; color: #aaa; padding: 5px 10px;">Robot Vision</h4>
-                            <div style="background:#000; text-align:center;">
-                                <img src="/api/camera/front"
-                                    style="max-width: 100%; max-height: 300px; height:auto; border-radius: 0;">
+                        <!-- Map container appended here when active -->
+
+                        <!-- Latest Analysis Panel (at bottom of left panel) -->
+                        <div class="patrol-analysis-panel">
+                            <div class="frame-header" style="background: var(--slate-dark); padding: 10px 14px; border-top: 1px solid var(--border-active);">
+                                <h4 style="margin: 0; color: var(--cyan-dim); font-family: var(--font-display); font-size: 10px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;">Latest AI Analysis</h4>
+                            </div>
+                            <div id="patrol-latest-result" class="content-pad" style="background: var(--slate-mid); padding: 14px; min-height: 80px;">
+                                Waiting for data...
                             </div>
                         </div>
-                        <!-- Map container will be appended here when active (takes remaining space) -->
                     </div>
 
-                    <!-- RIGHT: MONITOR INFO -->
+                    <!-- RIGHT: CAMERA + MONITOR INFO -->
                     <div class="right-panel">
-                        <div class="header"
-                            style="padding: 0; margin-bottom:0; text-align: left; display:flex; justify-content:space-between; align-items:center;">
-                            <h2 style="margin:0;">Live Monitor</h2>
+                        <div class="header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h2>Live Monitor</h2>
+                                <div id="next-patrol-display" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;"></div>
+                            </div>
                             <div class="actions">
                                 <button class="btn-primary" id="btn-start-patrol">▶ Start</button>
-                                <button class="btn-danger" id="btn-stop-patrol" disabled>⏹ Stop</button>
+                                <button class="btn-danger" id="btn-stop-patrol" disabled>■ Stop</button>
                             </div>
                         </div>
 
-                        <!-- 1. Latest Analysis Frame -->
-                        <div class="monitor-frame" style="flex: 0 0 auto;">
-                            <div class="frame-header">
-                                <h4 style="color: #26c6da;">Latest AI Analysis</h4>
+                        <!-- Camera Feed (Collapsible) -->
+                        <div class="monitor-frame collapsible" id="robot-vision-frame">
+                            <div class="frame-header" onclick="toggleRobotVisionPanel()">
+                                <h4>Robot Vision <span id="robot-vision-toggle" class="toggle-icon">▼</span></h4>
                             </div>
-                            <div class="frame-content">
-                                <div id="patrol-latest-result" class="content-pad"
-                                    style="min-height: 60px; color: #e0e0e0; font-size: 0.9rem;">
-                                    Waiting for data...
-                                </div>
+                            <div class="frame-content" id="robot-vision-content">
+                                <img src="/api/camera/front" alt="Robot Camera Feed" style="width: 100%; display: block;" />
                             </div>
                         </div>
 
-                        <!-- 2. Patrol Route Frame -->
-                        <div class="monitor-frame" style="flex: 1;">
-                            <div class="frame-header" style="display:flex; justify-content:space-between;">
-                                <h4>Patrol Route</h4>
-                                <span style="font-size:0.7rem; color:#888;">Order & Active</span>
+                        <!-- Patrol Route Frame -->
+                        <div class="monitor-frame collapsible" id="patrol-route-frame">
+                            <div class="frame-header" onclick="togglePatrolRoute()">
+                                <h4>Patrol Route <span id="patrol-route-toggle" class="toggle-icon">▼</span></h4>
                             </div>
-                            <div class="frame-content">
-                                <table class="data-table" id="patrol-view-points-table" style="width:100%;">
-                                    <thead style="position:sticky; top:0; background:#222; z-index:1;">
+                            <div class="frame-content" id="patrol-route-content">
+                                <table class="data-table" id="patrol-view-points-table">
+                                    <thead>
                                         <tr>
                                             <th>Location</th>
-                                            <th style="width: 50px;">Active</th>
+                                            <th style="width: 60px;">Active</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
-                                        <!-- JS Populated -->
-                                    </tbody>
+                                    <tbody></tbody>
                                 </table>
                             </div>
                         </div>
 
-                        <!-- 3. History Log Frame -->
-                        <div class="monitor-frame" style="flex: 1;">
-                            <div class="frame-header">
-                                <h4>History Log</h4>
+                        <!-- History Log Frame -->
+                        <div class="monitor-frame collapsible" id="history-log-frame">
+                            <div class="frame-header" onclick="toggleHistoryLog()">
+                                <h4>History Log <span id="history-log-toggle" class="toggle-icon">▼</span></h4>
                             </div>
-                            <div class="frame-content">
-                                <div id="results-container" class="results-grid">
-                                    <!-- JS Populated -->
+                            <div class="frame-content" id="history-log-content">
+                                <div id="results-container" class="results-grid"></div>
+                            </div>
+                        </div>
+
+                        <!-- Scheduled Patrol Frame -->
+                        <div class="monitor-frame collapsible" id="schedule-frame">
+                            <div class="frame-header" onclick="toggleSchedulePanel()">
+                                <h4>Scheduled Patrol <span id="schedule-toggle" class="toggle-icon">▼</span></h4>
+                            </div>
+                            <div class="frame-content" id="schedule-content">
+                                <div class="content-pad">
+                                    <!-- Add Schedule Form -->
+                                    <div class="schedule-add-form" style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center;">
+                                        <input type="time" id="schedule-time-input" style="flex: 0 0 auto;">
+                                        <button id="btn-add-schedule" class="btn-primary" style="padding: 8px 16px;">+ Add</button>
+                                    </div>
+
+                                    <!-- Schedule List -->
+                                    <div id="schedule-list" style="display: flex; flex-direction: column; gap: 8px;">
+                                        <!-- Populated by JS -->
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -236,66 +255,64 @@
                 </div>
             </div>
 
-
-
-            <!-- HISTORY VIEW -->
-            <div id="view-history" class="tab-content" style="display: none; padding-top: 80px;">
+            <!-- ═══════════════════════════════════════════════════════════════
+                 HISTORY VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-history" class="tab-content" style="display: none;">
                 <div class="header">
                     <h1>Patrol History</h1>
                 </div>
-                <div id="history-list" class="glass-panel"
-                    style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:15px; max-height: 80vh; overflow-y: auto;">
-                    <!-- JS Populated -->
-                </div>
+                <div id="history-list" class="glass-panel"></div>
             </div>
 
-            <!-- MODAL for details -->
-            <div id="history-modal"
-                style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
-                <div
-                    style="background:#1e1e1e; width:90%; max-width:800px; max-height:90vh; border-radius:12px; border:1px solid #333; display:flex; flex-direction:column; overflow:hidden; box-shadow: 0 0 30px rgba(0,0,0,0.5);">
-                    <div
-                        style="padding:15px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center; background:#252525;">
-                        <h2 id="modal-title" style="margin:0; font-size:1.2rem; color:#fff;">Report Details</h2>
-                        <button onclick="closeHistoryModal()"
-                            style="background:none; border:none; color:#aaa; font-size:1.5rem; cursor:pointer;">&times;</button>
+            <!-- History Detail Modal -->
+            <div id="history-modal">
+                <div>
+                    <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; background: var(--slate-mid);">
+                        <h2 id="modal-title">Report Details</h2>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <button id="btn-save-pdf" class="btn-primary" style="padding: 8px 16px; font-size: 11px;">
+                                📄 Save PDF
+                            </button>
+                            <button onclick="closeHistoryModal()" style="background: none; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; padding: 4px 8px;">&times;</button>
+                        </div>
                     </div>
-                    <div style="flex:1; overflow-y:auto; padding:20px;">
-                        <div style="margin-bottom:20px;">
-                            <h3 style="color:#26c6da; margin-top:0;">AI Summary Report</h3>
-                            <div id="modal-report-content"
-                                style="background:rgba(255,255,255,0.05); padding:15px; border-radius:6px; line-height:1.6; color:#e0e0e0; white-space: pre-wrap;">
-                            </div>
+                    <div id="modal-content-wrapper" style="flex: 1; overflow-y: auto; padding: 24px;">
+                        <div style="margin-bottom: 24px;">
+                            <h3>AI Summary Report</h3>
+                            <div id="modal-report-content" style="background: var(--deep-space); padding: 16px; border-radius: var(--radius-sm); line-height: 1.6; white-space: pre-wrap; border: 1px solid var(--border-subtle);"></div>
                         </div>
                         <div>
-                            <h3 style="color:#26c6da;">Inspection Points</h3>
-                            <div id="modal-inspections-list" style="display:flex; flex-direction:column; gap:10px;">
-                                <!-- Items -->
-                            </div>
+                            <h3>Inspection Points</h3>
+                            <div id="modal-inspections-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- STATS VIEW -->
-            <div id="view-stats" class="tab-content" style="display: none; padding-top: 80px;">
+            <!-- ═══════════════════════════════════════════════════════════════
+                 STATS VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-stats" class="tab-content" style="display: none; padding: 24px;">
                 <div class="header">
                     <h1>Token Usage Statistics</h1>
-                    <div style="display:flex; gap:10px;">
-                        <input type="date" id="stats-start-date" style="padding: 5px; border-radius: 4px; border:none;">
-                        <span style="color:white; align-self:center;">to</span>
-                        <input type="date" id="stats-end-date" style="padding: 5px; border-radius: 4px; border:none;">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="date" id="stats-start-date">
+                        <span style="color: var(--text-muted);">to</span>
+                        <input type="date" id="stats-end-date">
                     </div>
                 </div>
-                <div class="glass-panel" style="position: relative; height: 60vh; width: 90%; margin: 0 auto;">
-                     <canvas id="tokenUsageChart"></canvas>
+                <div class="glass-panel" style="position: relative; height: 60vh; width: 100%; max-width: 1200px;">
+                    <canvas id="tokenUsageChart"></canvas>
                 </div>
             </div>
 
-            <!-- SETTINGS VIEW -->
-            <div id="view-settings" class="tab-content" style="display: none; padding-top: 80px;">
+            <!-- ═══════════════════════════════════════════════════════════════
+                 SETTINGS VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-settings" class="tab-content" style="display: none;">
                 <div class="header">
-                    <h1>Settings</h1>
+                    <h1>System Configuration</h1>
                 </div>
                 <div class="form-container glass-panel">
                     <div class="form-group">
@@ -312,8 +329,7 @@
                     </div>
                     <div class="form-group">
                         <label>Timezone</label>
-                        <select id="setting-timezone"
-                            style="background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid #555; padding: 8px; border-radius: 4px;">
+                        <select id="setting-timezone">
                             <option value="UTC">UTC</option>
                             <option value="Asia/Taipei">Asia/Taipei</option>
                             <option value="Asia/Tokyo">Asia/Tokyo</option>
@@ -322,20 +338,19 @@
                             <option value="Europe/London">Europe/London</option>
                         </select>
                     </div>
-                    <div class="form-group"
-                        style="flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;">
-                        <input type="checkbox" id="setting-turbo-mode" style="width: auto; margin: 0;">
-                        <label for="setting-turbo-mode" style="margin: 0;">Enable Turbo Mode (Async Analysis)</label>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                        <input type="checkbox" id="setting-turbo-mode" style="width: auto;">
+                        <label for="setting-turbo-mode" style="margin: 0; cursor: pointer;">Enable Turbo Mode (Async Analysis)</label>
                     </div>
                     <div class="form-group">
                         <label>System Role / Prompt</label>
-                        <textarea id="setting-role" rows="4"></textarea>
+                        <textarea id="setting-role" rows="4" placeholder="Define the AI's behavior and context..."></textarea>
                     </div>
                     <div class="form-group">
-                        <label>Report Prompt (Custom Instruction for Report Generation)</label>
-                        <textarea id="setting-report-prompt" rows="3" placeholder="Enter instructions for report generation..."></textarea>
+                        <label>Report Prompt</label>
+                        <textarea id="setting-report-prompt" rows="3" placeholder="Custom instructions for report generation..."></textarea>
                     </div>
-                    <button class="btn-primary" id="btn-save-settings">Save Settings</button>
+                    <button class="btn-primary" id="btn-save-settings" style="align-self: flex-start; margin-top: 8px;">Save Settings</button>
                 </div>
             </div>
 
@@ -344,6 +359,7 @@
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </body>
 
 </html>

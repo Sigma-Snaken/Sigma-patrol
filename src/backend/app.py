@@ -3,6 +3,7 @@ import time
 import io
 import json
 import os
+from datetime import datetime
 import flask
 from flask import Flask, jsonify, request, send_file, render_template, send_from_directory
 from PIL import Image
@@ -14,6 +15,7 @@ from database import init_db, get_db_connection
 from robot_service import robot_service
 from patrol_service import patrol_service
 from ai_service import ai_service
+from pdf_service import generate_patrol_report
 
 import logging
 
@@ -253,6 +255,68 @@ def import_points():
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+@app.route('/api/points/from_robot', methods=['GET'])
+def get_points_from_robot():
+    """Fetch locations saved on the robot and merge with existing points"""
+    try:
+        # Get locations from robot
+        robot_locations = robot_service.get_locations()
+        if not robot_locations:
+            return jsonify({"error": "No locations found on robot or robot not connected"}), 404
+
+        # Load existing points
+        existing_points = load_json(POINTS_FILE, [])
+
+        # Helper function to compare coordinates (2 decimal places)
+        def coords_match(p1, p2):
+            return (round(p1.get('x', 0), 2) == round(p2.get('x', 0), 2) and
+                    round(p1.get('y', 0), 2) == round(p2.get('y', 0), 2))
+
+        # Check for duplicates and add new locations
+        added = []
+        skipped = []
+
+        for loc in robot_locations:
+            # Check if this location already exists (same name AND same coordinates)
+            is_duplicate = False
+            for existing in existing_points:
+                if existing.get('name') == loc['name'] and coords_match(existing, loc):
+                    is_duplicate = True
+                    break
+
+            if is_duplicate:
+                skipped.append(loc['name'])
+            else:
+                # Add as new patrol point
+                new_point = {
+                    "id": str(int(time.time() * 1000)) + "_" + loc['id'][:8] if loc.get('id') else str(int(time.time() * 1000)),
+                    "name": loc['name'],
+                    "x": loc['x'],
+                    "y": loc['y'],
+                    "theta": loc.get('theta', 0.0),
+                    "prompt": "Is everything normal?",
+                    "enabled": True,
+                    "source": "robot"
+                }
+                existing_points.append(new_point)
+                added.append(loc['name'])
+
+        # Save updated points
+        if added:
+            save_json(POINTS_FILE, existing_points)
+
+        return jsonify({
+            "status": "success",
+            "added": added,
+            "skipped": skipped,
+            "total_robot_locations": len(robot_locations),
+            "total_points": len(existing_points)
+        })
+
+    except Exception as e:
+        logging.error(f"Error fetching locations from robot: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/patrol/status', methods=['GET'])
 def get_patrol_status_route():
     return jsonify(patrol_service.get_status())
@@ -269,6 +333,51 @@ def start_patrol_route():
 def stop_patrol_route():
     patrol_service.stop_patrol()
     return jsonify({"status": "stopping"})
+
+# --- Scheduled Patrol APIs ---
+
+@app.route('/api/patrol/schedule', methods=['GET', 'POST'])
+def handle_patrol_schedule():
+    if request.method == 'GET':
+        return jsonify(patrol_service.get_schedule())
+    elif request.method == 'POST':
+        data = request.json
+        time_str = data.get('time')
+        days = data.get('days')  # Optional: list of day numbers (0=Mon, 6=Sun)
+        enabled = data.get('enabled', True)
+
+        if not time_str:
+            return jsonify({"error": "Time is required"}), 400
+
+        # Validate time format
+        try:
+            datetime.strptime(time_str, "%H:%M")
+        except ValueError:
+            return jsonify({"error": "Invalid time format. Use HH:MM"}), 400
+
+        schedule = patrol_service.add_schedule(time_str, days, enabled)
+        return jsonify({"status": "added", "schedule": schedule})
+
+@app.route('/api/patrol/schedule/<schedule_id>', methods=['PUT', 'DELETE'])
+def handle_patrol_schedule_item(schedule_id):
+    if request.method == 'PUT':
+        data = request.json
+        time_str = data.get('time')
+        days = data.get('days')
+        enabled = data.get('enabled')
+
+        # Validate time format if provided
+        if time_str:
+            try:
+                datetime.strptime(time_str, "%H:%M")
+            except ValueError:
+                return jsonify({"error": "Invalid time format. Use HH:MM"}), 400
+
+        patrol_service.update_schedule(schedule_id, time_str, days, enabled)
+        return jsonify({"status": "updated"})
+    elif request.method == 'DELETE':
+        patrol_service.delete_schedule(schedule_id)
+        return jsonify({"status": "deleted"})
 
 @app.route('/api/patrol/results', methods=['GET'])
 def get_patrol_results():
@@ -347,6 +456,37 @@ def get_history_detail(run_id):
         "run": dict(run),
         "inspections": [dict(i) for i in inspections]
     })
+
+@app.route('/api/report/<int:run_id>/pdf')
+def download_pdf_report(run_id):
+    """Generate and download PDF report for a patrol run"""
+    try:
+        # Get start_time for filename
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT start_time FROM patrol_runs WHERE id = ?', (run_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row and row['start_time']:
+            # Format: 2025-01-15 14:30:00 -> 2025-01-15_143000
+            start_time_str = row['start_time'].replace(' ', '_').replace(':', '')
+            filename = f'patrol_report_{run_id}_{start_time_str}.pdf'
+        else:
+            filename = f'patrol_report_{run_id}.pdf'
+
+        pdf_bytes = generate_patrol_report(run_id)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Failed to generate PDF for run {run_id}: {e}")
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
 
 @app.route('/api/images/<path:filename>')
 def serve_image(filename):

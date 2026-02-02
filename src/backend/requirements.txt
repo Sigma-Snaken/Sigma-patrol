@@ -3,3 +3,4 @@ kachaka-api
 numpy
 pillow
 google-generativeai
+reportlab

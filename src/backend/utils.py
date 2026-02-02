@@ -1,9 +1,53 @@
+"""
+Utility functions for Sigma Patrol system.
+Includes JSON I/O and timezone-aware time utilities.
+"""
+
 import os
 import json
 import tempfile
 import shutil
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-def load_json(filepath, default):
+# Lazy import to avoid circular dependency
+_settings_cache = None
+_settings_mtime = 0
+
+
+def _get_settings():
+    """Get settings with simple file modification time caching."""
+    global _settings_cache, _settings_mtime
+    from config import SETTINGS_FILE, DEFAULT_SETTINGS
+
+    try:
+        current_mtime = os.path.getmtime(SETTINGS_FILE)
+        if _settings_cache is None or current_mtime > _settings_mtime:
+            _settings_cache = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+            _settings_mtime = current_mtime
+    except OSError:
+        if _settings_cache is None:
+            _settings_cache = DEFAULT_SETTINGS
+
+    return _settings_cache
+
+
+def _get_timezone():
+    """Get configured timezone, with fallback to UTC."""
+    settings = _get_settings()
+    tz_name = settings.get('timezone', 'UTC')
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+# === JSON I/O ===
+
+def load_json(filepath, default=None):
+    """Load JSON file with fallback to default value."""
+    if default is None:
+        default = {}
     if not os.path.exists(filepath):
         return default
     try:
@@ -12,25 +56,64 @@ def load_json(filepath, default):
     except Exception:
         return default
 
+
 def save_json(filepath, data):
     """
     Atomically save JSON data to file.
-    Uses a temp file + rename to prevent corruption on crash.
-    Raises exception on failure so caller can handle it.
+    Uses temp file + rename to prevent corruption on crash.
     """
     dir_path = os.path.dirname(filepath)
     if dir_path and not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
 
-    # Write to temp file first, then atomically rename
     fd, temp_path = tempfile.mkstemp(suffix='.json', dir=dir_path)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        # Atomic rename (on POSIX systems)
         shutil.move(temp_path, filepath)
     except Exception:
-        # Clean up temp file on failure
         if os.path.exists(temp_path):
             os.remove(temp_path)
         raise
+
+
+# === Time Utilities ===
+
+def get_current_time_str():
+    """Returns current time as 'YYYY-MM-DD HH:MM:SS' in configured timezone."""
+    return datetime.now(_get_timezone()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_current_datetime():
+    """Returns current datetime object in configured timezone."""
+    return datetime.now(_get_timezone())
+
+
+def get_filename_timestamp():
+    """Returns current time as 'YYYYMMDD_HHMMSS' for filenames."""
+    return datetime.now(_get_timezone()).strftime("%Y%m%d_%H%M%S")
+
+
+# === Image Utilities ===
+
+def rename_image_with_status(image_path, is_ng):
+    """
+    Rename image file to include OK/NG status.
+    Example: image.jpg -> image_OK.jpg or image_NG.jpg
+    """
+    if not image_path or not os.path.exists(image_path):
+        return image_path
+
+    status_tag = "NG" if is_ng else "OK"
+    base, ext = os.path.splitext(image_path)
+
+    # Avoid double-tagging
+    if base.endswith("_OK") or base.endswith("_NG"):
+        return image_path
+
+    new_path = f"{base}_{status_tag}{ext}"
+    try:
+        os.rename(image_path, new_path)
+        return new_path
+    except OSError:
+        return image_path

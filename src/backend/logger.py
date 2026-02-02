@@ -1,7 +1,7 @@
 import logging
 import os
 from config import LOG_DIR
-from time_utils import get_current_datetime
+from utils import get_current_datetime
 
 class TimezoneFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):

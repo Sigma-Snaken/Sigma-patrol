@@ -1,129 +1,211 @@
-# Sigma Single Robot Patrol with Gemini
+# Sigma Patrol
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.x-green)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
 ![Gemini](https://img.shields.io/badge/AI-Google%20Gemini-orange)
 
-這是一個整合 **Kachaka 智慧機器人** 與 **Google Gemini AI** 的全自動巡邏檢測系統。機器人能夠依照設定的路線自動巡邏，拍攝關鍵地點的照片，並即時利用 AI 分析環境狀況，識別潛在異常。
+An autonomous robot patrol system integrating **Kachaka Robot** with **Google Gemini Vision AI** for intelligent environment monitoring and anomaly detection.
 
-## ✨ 主要功能
+## Features
 
-- **🚀 智慧巡邏**: 可設定多個巡邏點位，機器人自動導航並精確定位。
-- **🧠 AI 環境檢測**: 整合 Google Gemini Vision 模型，對巡邏照片進行深度語意分析（例如：偵測跌倒、入侵者、物品遺失等）。
-- **📊 即時監控儀表板**: 
-  - 顯示機器人即時位置、電量、地圖。
-  - 即時影像串流（前後鏡頭）。
-  - 最新 AI 分析結果與 Token 使用量統計。
-- **🎮 手動控制**: 支援網頁介面手動遙控機器人移動。
-- **📝 完整的歷史紀錄**: 自動保存每次巡邏的詳細報告、照片與 AI 分析結果，並支援回放檢視。
+- **Autonomous Patrol** - Define waypoints and let the robot navigate automatically
+- **AI-Powered Inspection** - Gemini Vision analyzes images for anomalies (falls, intruders, hazards)
+- **Real-time Dashboard** - Live map, robot position, battery, dual camera streams
+- **Scheduled Patrols** - Set recurring patrol times with day-of-week filtering
+- **PDF Reports** - Generate downloadable patrol reports with images and AI analysis
+- **Manual Control** - Web-based remote control with D-pad navigation
+- **History & Analytics** - Browse past patrols with token usage statistics
 
-## 📂 專案結構
+## Quick Start (Docker)
 
-此專案採用前後端分離架構，所有程式碼與設定檔皆組織於以下結構中：
+```bash
+# Start the service
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f
+```
+
+Access the web interface at [http://localhost:5000](http://localhost:5000)
+
+### Initial Setup
+
+1. Go to **Settings** tab
+2. Enter your **Google Gemini API Key**
+3. Configure **Robot IP** (default: `192.168.50.133:26400`)
+4. Set your **Timezone**
+5. Click **Save Settings**
+
+## Project Structure
 
 ```
-my-ai-project/
+Sigma-patrol/
 ├── src/
-│   ├── backend/        # Python Flask 後端 API 服務
-│   │   ├── app.py      # 主程式入口
-│   │   ├── ai_service.py # Gemini AI 整合邏輯
-│   │   ├── patrol_service.py # 巡邏流程控制
-│   │   └── ...
-│   └── frontend/       # Web 前端介面
-│       ├── static/     # CSS, JS, Images
-│       └── templates/  # HTML 模板
-├── data/               # 資料儲存區 (Docker Volume)
-│   ├── config/         # 設定檔 (points.json, settings.json)
-│   ├── images/         # 巡邏拍攝的照片
-│   └── database.db     # SQLite 資料庫 (儲存巡邏紀錄)
-├── logs/               # 系統日誌
-├── Dockerfile          # Docker 建置檔
-└── docker-compose.yml  # Docker Compose 設定
+│   ├── backend/                 # Python Flask backend
+│   │   ├── app.py              # REST API server
+│   │   ├── patrol_service.py   # Patrol orchestration
+│   │   ├── robot_service.py    # Kachaka robot interface
+│   │   ├── ai_service.py       # Gemini AI integration
+│   │   ├── pdf_service.py      # PDF report generation
+│   │   ├── database.py         # SQLite management
+│   │   ├── config.py           # Configuration paths
+│   │   ├── utils.py            # Utilities (JSON, time, etc.)
+│   │   ├── logger.py           # Timezone-aware logging
+│   │   └── requirements.txt    # Python dependencies
+│   │
+│   └── frontend/               # Web UI
+│       ├── templates/
+│       │   └── index.html      # Single-page app
+│       └── static/
+│           ├── css/style.css   # Industrial HUD theme
+│           └── js/main.js      # UI logic
+│
+├── data/                       # Runtime data (Docker volume)
+│   ├── config/
+│   │   ├── points.json         # Patrol waypoints
+│   │   └── settings.json       # System settings
+│   ├── patrol_schedule.json    # Scheduled patrols
+│   └── report/
+│       ├── report.db           # SQLite database
+│       └── images/             # Captured patrol images
+│
+├── logs/                       # Application logs
+├── tools/                      # Debug & inspection utilities
+├── tests/                      # Unit tests
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 🚀 快速開始 (Docker 推薦)
+## Local Development
 
-這是最簡單的部署方式，無需在本地安裝複雜的 Python 環境。
+```bash
+# Install dependencies
+pip install -r src/backend/requirements.txt
 
-### 前置需求
-1. 安裝 [Docker](https://www.docker.com/) 與 Docker Compose。
-2. 確保電腦與 Kachaka 機器人位於 **同一區域網路 (Wi-Fi/LAN)** 下。
+# Set environment variables
+export DATA_DIR=$(pwd)/data
+export LOG_DIR=$(pwd)/logs
 
-### 步驟
+# Run the server
+python src/backend/app.py
+```
 
-1. **啟動服務**
-   在專案根目錄開啟終端機，執行：
-   ```bash
-   docker-compose up --build -d
-   ```
+## API Reference
 
-2. **訪問網頁介面**
-   打開瀏覽器訪問 [http://localhost:5000](http://localhost:5000)。
+### Robot Control
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/state` | GET | Robot status (battery, pose, map) |
+| `/api/map` | GET | PNG map image |
+| `/api/move` | POST | Move to coordinates `{x, y, theta}` |
+| `/api/manual_control` | POST | D-pad control `{action}` |
+| `/api/return_home` | POST | Return to charging station |
+| `/api/camera/front` | GET | Front camera MJPEG stream |
+| `/api/camera/back` | GET | Back camera MJPEG stream |
 
-3. **系統設定**
-   - 進入「檢測設定」頁面。
-   - 輸入您的 **Google Gemini API Key**。
-   - 輸入 **Kachaka 機器人 IP**。
-   - 儲存設定後，系統即準備就緒。
+### Patrol Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/patrol/start` | POST | Start patrol |
+| `/api/patrol/stop` | POST | Stop patrol |
+| `/api/patrol/status` | GET | Current patrol status |
+| `/api/patrol/schedule` | GET/POST | Manage scheduled patrols |
+| `/api/patrol/results` | GET | Recent inspection results |
 
-4. **查看日誌 (Optional)**
-   若需除錯，可執行：
-   ```bash
-   docker-compose logs -f
-   ```
+### Points & Settings
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/points` | GET/POST/DELETE | Manage patrol waypoints |
+| `/api/points/reorder` | POST | Reorder waypoints |
+| `/api/points/from_robot` | GET | Import locations from robot |
+| `/api/settings` | GET/POST | System settings |
 
-## 🛠️ 本地開發 (Local Development)
+### History & Reports
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/history` | GET | List all patrol runs |
+| `/api/history/<run_id>` | GET | Patrol run details |
+| `/api/report/<run_id>/pdf` | GET | Download PDF report |
+| `/api/stats/token_usage` | GET | Token usage by date |
 
-若您是開發者，希望修改程式碼進行測試：
+### AI Testing
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/test_ai` | POST | Test AI on current camera frame |
 
-1. **安裝 Python 依賴**
-   ```bash
-   pip install -r src/backend/requirements.txt
-   ```
+## Configuration
 
-2. **設定環境變數並執行**
-   Linux / macOS:
-   ```bash
-   export DATA_DIR=$(pwd)/data
-   export LOG_DIR=$(pwd)/logs
-   python src/backend/app.py
-   ```
-   
-   Windows (PowerShell):
-   ```powershell
-   $env:DATA_DIR="$(Get-Location)\data"
-   $env:LOG_DIR="$(Get-Location)\logs"
-   python src/backend/app.py
-   ```
+### settings.json
+```json
+{
+    "gemini_api_key": "your-api-key",
+    "gemini_model": "gemini-2.5-flash",
+    "robot_ip": "192.168.50.133:26400",
+    "timezone": "Asia/Taipei",
+    "system_prompt": "You are a security robot...",
+    "report_prompt": "Generate a patrol summary...",
+    "turbo_mode": false
+}
+```
 
-## 🧩 技術細節
+### points.json
+```json
+[
+    {
+        "id": "unique-id",
+        "name": "Entrance",
+        "x": 1.5,
+        "y": 2.0,
+        "theta": 0.0,
+        "prompt": "Check for obstructions",
+        "enabled": true
+    }
+]
+```
 
-### 後端 (Backend)
-- **Framework**: Flask
-- **Database**: SQLite (透過 `sqlite3` 與 `database.py` 管理)
-- **AI Integration**: Google Generative AI Python SDK (`google-generativeai`)
-- **Robot Control**: `kachaka-api` gRPC client
-- **Concurrency**: 使用 Threading 處理背景巡邏任務與機器人狀態輪詢。
+## Architecture
 
-### 前端 (Frontend)
-- **Technologies**: HTML5, CSS3, Vanilla JavaScript.
-- **Data Flow**: 透過 RESTful API 與後端溝通，使用 Polling 機制更新即時狀態。
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Browser   │────▶│  Flask API  │────▶│   Kachaka   │
+│  (main.js)  │◀────│  (app.py)   │◀────│   Robot     │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                          │
+              ┌───────────┼───────────┐
+              ▼           ▼           ▼
+      ┌──────────┐ ┌──────────┐ ┌──────────┐
+      │  Patrol  │ │    AI    │ │   PDF    │
+      │ Service  │ │ Service  │ │ Service  │
+      └────┬─────┘ └────┬─────┘ └──────────┘
+           │            │
+           ▼            ▼
+      ┌──────────┐ ┌──────────┐
+      │  SQLite  │ │  Gemini  │
+      │    DB    │ │   API    │
+      └──────────┘ └──────────┘
+```
 
-### 連線機制
-- 系統會自動嘗試連線機器人，若斷線會每 2 秒重試一次。
-- 狀態更新頻率為 10Hz (每 0.1 秒)。
+## Turbo Mode
 
-## ❓ 常見問題 (Troubleshooting)
+Enable **Turbo Mode** in settings to queue AI inspections asynchronously. This allows the robot to continue moving while images are being analyzed, reducing total patrol time.
 
-**Q: 介面顯示 "Robot Disconnected"?**
-- 請確認機器人 IP 設定正確。
-- 請確認電腦與機器人在同一網域。
-- 若使用 Docker，請確認 Docker 網路設定無誤（預設 bridge 模式通常可行，若有問題可嘗試 `network_mode: host`，注意 host 模式僅支援 Linux）。
+## Troubleshooting
 
-**Q: AI 分析失敗?**
-- 請確認 API Key 是否有效。
-- 檢查 `logs/app.log` 查看詳細錯誤訊息。
+**Robot Disconnected**
+- Verify robot IP in settings
+- Ensure same network as robot
+- Check if Kachaka API port (26400) is accessible
 
----
-Developed for Kachaka Robot Integration. 2026.
+**AI Analysis Failed**
+- Verify Gemini API key is valid
+- Check `logs/ai_service.log` for errors
+- Ensure sufficient API quota
+
+**PDF Generation Failed**
+- Check `logs/app.log` for errors
+- Verify images exist in `data/report/images/`
+
+## License
+
+Developed for Kachaka Robot Integration.

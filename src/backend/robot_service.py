@@ -167,5 +167,27 @@ class RobotService:
             return client.get_robot_serial_number()
         return "unknown"
 
+    def get_locations(self):
+        """Get all saved locations from the robot"""
+        with self.client_lock:
+            client = self.client
+        if client:
+            try:
+                locations = client.get_locations()
+                result = []
+                for loc in locations:
+                    result.append({
+                        "id": loc.id,
+                        "name": loc.name,
+                        "x": loc.pose.x,
+                        "y": loc.pose.y,
+                        "theta": loc.pose.theta
+                    })
+                return result
+            except Exception as e:
+                print(f"Error getting locations: {e}")
+                return []
+        return []
+
 # Singleton instance
 robot_service = RobotService()

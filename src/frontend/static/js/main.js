@@ -44,6 +44,54 @@ document.addEventListener('DOMContentLoaded', () => {
     // New Listeners
     if (btnAddPoint) btnAddPoint.addEventListener('click', addCurrentPoint);
     if (btnAddPointQuick) btnAddPointQuick.addEventListener('click', addCurrentPoint);
+
+    // Get locations from robot button
+    const btnGetRobotLocations = document.getElementById('btn-get-robot-locations');
+    if (btnGetRobotLocations) {
+        btnGetRobotLocations.addEventListener('click', getLocationsFromRobot);
+    }
+
+    async function getLocationsFromRobot() {
+        const btn = document.getElementById('btn-get-robot-locations');
+        const originalText = btn.innerHTML;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span style="font-size: 12px;">⏳</span> Loading...';
+
+        try {
+            const res = await fetch('/api/points/from_robot');
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to fetch locations');
+            }
+
+            // Build result message
+            let message = '';
+            if (data.added && data.added.length > 0) {
+                message += `Added ${data.added.length} location(s):\n• ${data.added.join('\n• ')}\n\n`;
+            }
+            if (data.skipped && data.skipped.length > 0) {
+                message += `Skipped ${data.skipped.length} duplicate(s):\n• ${data.skipped.join('\n• ')}`;
+            }
+            if (data.added.length === 0 && data.skipped.length === 0) {
+                message = 'No locations found on robot.';
+            }
+
+            alert(message || 'Operation completed.');
+
+            // Reload points to reflect changes
+            if (data.added && data.added.length > 0) {
+                loadPoints();
+            }
+
+        } catch (e) {
+            alert('Error: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
     if (btnSaveSettings) btnSaveSettings.addEventListener('click', saveSettings);
     if (btnStartPatrol) btnStartPatrol.addEventListener('click', startPatrol);
     if (btnStopPatrol) btnStopPatrol.addEventListener('click', stopPatrol);
@@ -81,12 +129,277 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(resizeCanvas, 50);
         } else if (tabName === 'patrol') {
             const dest = document.getElementById('patrol-left-panel');
-            if (dest && mapContainer.parentNode !== dest) dest.appendChild(mapContainer);
+            const analysisPanel = dest ? dest.querySelector('.patrol-analysis-panel') : null;
+            if (dest && mapContainer.parentNode !== dest) {
+                // Insert map before the analysis panel
+                if (analysisPanel) {
+                    dest.insertBefore(mapContainer, analysisPanel);
+                } else {
+                    dest.prepend(mapContainer);
+                }
+            }
             setTimeout(resizeCanvas, 50);
-        } else if (tabName === 'history') {
-            // Already handled above
         }
     };
+
+    // --- COLLAPSIBLE PANELS ---
+    window.toggleHistoryLog = function () {
+        const frame = document.getElementById('history-log-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.togglePatrolRoute = function () {
+        const frame = document.getElementById('patrol-route-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.toggleSchedulePanel = function () {
+        const frame = document.getElementById('schedule-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.toggleAITestPanel = function () {
+        const frame = document.getElementById('ai-test-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.togglePatrolPointsPanel = function () {
+        const frame = document.getElementById('patrol-points-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.toggleFrontCameraPanel = function () {
+        const frame = document.getElementById('front-camera-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    window.toggleRobotVisionPanel = function () {
+        const frame = document.getElementById('robot-vision-frame');
+        if (frame) {
+            frame.classList.toggle('collapsed');
+        }
+    };
+
+    // --- SCHEDULED PATROL ---
+    let scheduledPatrols = [];
+    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    async function loadSchedule() {
+        try {
+            const res = await fetch('/api/patrol/schedule');
+            scheduledPatrols = await res.json();
+            renderScheduleList();
+        } catch (e) {
+            console.error("Failed to load schedule:", e);
+        }
+    }
+
+    function renderScheduleList() {
+        const container = document.getElementById('schedule-list');
+        if (!container) return;
+
+        if (scheduledPatrols.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 12px;">No scheduled patrols</div>';
+            return;
+        }
+
+        container.innerHTML = '';
+        scheduledPatrols.forEach(schedule => {
+            const item = document.createElement('div');
+            item.className = 'schedule-item';
+            item.style.cssText = 'display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--slate-dark); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);';
+
+            // Time display
+            const timeSpan = document.createElement('span');
+            timeSpan.style.cssText = 'font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--cyan-glow); min-width: 60px;';
+            timeSpan.textContent = schedule.time;
+
+            // Days display
+            const daysSpan = document.createElement('span');
+            daysSpan.style.cssText = 'flex: 1; font-size: 11px; color: var(--text-secondary);';
+            const activeDays = (schedule.days || [0,1,2,3,4,5,6]).map(d => dayNames[d]).join(', ');
+            daysSpan.textContent = schedule.days && schedule.days.length < 7 ? activeDays : 'Every day';
+
+            // Toggle switch
+            const toggleLabel = document.createElement('label');
+            toggleLabel.style.cssText = 'display: flex; align-items: center; cursor: pointer;';
+            const toggleCheckbox = document.createElement('input');
+            toggleCheckbox.type = 'checkbox';
+            toggleCheckbox.checked = schedule.enabled !== false;
+            toggleCheckbox.style.cssText = 'width: 18px; height: 18px;';
+            toggleCheckbox.onchange = () => toggleSchedule(schedule.id, toggleCheckbox.checked);
+            toggleLabel.appendChild(toggleCheckbox);
+
+            // Delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.innerHTML = '✕';
+            deleteBtn.style.cssText = 'background: none; border: none; color: var(--red-alert); cursor: pointer; font-size: 14px; padding: 4px 8px; opacity: 0.7;';
+            deleteBtn.onmouseover = () => deleteBtn.style.opacity = '1';
+            deleteBtn.onmouseout = () => deleteBtn.style.opacity = '0.7';
+            deleteBtn.onclick = () => deleteSchedule(schedule.id);
+
+            item.appendChild(timeSpan);
+            item.appendChild(daysSpan);
+            item.appendChild(toggleLabel);
+            item.appendChild(deleteBtn);
+            container.appendChild(item);
+        });
+    }
+
+    async function addSchedule() {
+        const timeInput = document.getElementById('schedule-time-input');
+        if (!timeInput || !timeInput.value) {
+            alert('Please select a time');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/patrol/schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    time: timeInput.value,
+                    enabled: true
+                })
+            });
+
+            if (res.ok) {
+                timeInput.value = '';
+                loadSchedule();
+            } else {
+                const data = await res.json();
+                alert('Failed to add schedule: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Failed to add schedule: ' + e);
+        }
+    }
+
+    async function toggleSchedule(id, enabled) {
+        try {
+            await fetch(`/api/patrol/schedule/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled })
+            });
+            loadSchedule();
+        } catch (e) {
+            console.error("Failed to toggle schedule:", e);
+        }
+    }
+
+    async function deleteSchedule(id) {
+        try {
+            await fetch(`/api/patrol/schedule/${id}`, {
+                method: 'DELETE'
+            });
+            loadSchedule();
+        } catch (e) {
+            console.error("Failed to delete schedule:", e);
+        }
+    }
+
+    // Add schedule button listener
+    const btnAddSchedule = document.getElementById('btn-add-schedule');
+    if (btnAddSchedule) {
+        btnAddSchedule.addEventListener('click', addSchedule);
+    }
+
+    // Calculate and display next scheduled patrol
+    function updateNextPatrolDisplay() {
+        const display = document.getElementById('next-patrol-display');
+        if (!display) return;
+
+        const enabledSchedules = scheduledPatrols.filter(s => s.enabled !== false);
+        if (enabledSchedules.length === 0) {
+            display.innerHTML = '';
+            return;
+        }
+
+        const now = new Date();
+        const currentDay = now.getDay(); // 0=Sunday, need to convert to 0=Monday
+        const todayIndex = currentDay === 0 ? 6 : currentDay - 1;
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        let nextPatrol = null;
+        let minMinutesAway = Infinity;
+
+        enabledSchedules.forEach(schedule => {
+            const [hours, mins] = schedule.time.split(':').map(Number);
+            const scheduleMinutes = hours * 60 + mins;
+            const scheduleDays = schedule.days || [0,1,2,3,4,5,6];
+
+            // Check each day starting from today
+            for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+                const checkDayIndex = (todayIndex + dayOffset) % 7;
+
+                if (!scheduleDays.includes(checkDayIndex)) continue;
+
+                let minutesAway;
+                if (dayOffset === 0) {
+                    // Today
+                    if (scheduleMinutes > currentMinutes) {
+                        minutesAway = scheduleMinutes - currentMinutes;
+                    } else {
+                        continue; // Already passed today
+                    }
+                } else {
+                    // Future day
+                    minutesAway = (dayOffset * 24 * 60) + scheduleMinutes - currentMinutes;
+                }
+
+                if (minutesAway < minMinutesAway) {
+                    minMinutesAway = minutesAway;
+                    nextPatrol = {
+                        time: schedule.time,
+                        dayOffset: dayOffset
+                    };
+                }
+            }
+        });
+
+        if (nextPatrol) {
+            let timeText;
+            if (nextPatrol.dayOffset === 0) {
+                timeText = `Today at ${nextPatrol.time}`;
+            } else if (nextPatrol.dayOffset === 1) {
+                timeText = `Tomorrow at ${nextPatrol.time}`;
+            } else {
+                const nextDate = new Date(now);
+                nextDate.setDate(nextDate.getDate() + nextPatrol.dayOffset);
+                const dayName = dayNames[(todayIndex + nextPatrol.dayOffset) % 7];
+                timeText = `${dayName} at ${nextPatrol.time}`;
+            }
+            display.innerHTML = `<span style="color: var(--cyan-dim);">⏰</span> Next: <span style="color: var(--text-primary);">${timeText}</span>`;
+        } else {
+            display.innerHTML = '';
+        }
+    }
+
+    // Update next patrol display when schedule changes
+    const originalRenderScheduleList = renderScheduleList;
+    renderScheduleList = function() {
+        originalRenderScheduleList();
+        updateNextPatrolDisplay();
+    };
+
+    // Load schedule on page load
+    loadSchedule();
+
+    // Update next patrol display every minute
+    setInterval(updateNextPatrolDisplay, 60000);
 
     // ... [Previous Map, Polling, Draw, Input logic] ... 
     // I will use replace_file_content to inject the renderPointsTable update and testAI function
@@ -160,6 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isMapLoaded = false;
     let isDragging = false;
     let dragStart = null;
+    let canvasScale = 1; // Track CSS scale for consistent icon sizing
     let dragCurrent = null;
     let currentPatrolPoints = [];
     let currentSettingsTimezone = 'UTC';
@@ -276,7 +590,21 @@ document.addEventListener('DOMContentLoaded', () => {
         window.debugMapImage = mapImage; // Expose
 
         mapImage.onload = () => {
-            console.log("Map image LOADED. Size:", mapImage.width, mapImage.height);
+            console.log("Map image LOADED. Image size:", mapImage.width, "x", mapImage.height);
+            if (mapInfo) {
+                console.log("Map info:", {
+                    resolution: mapInfo.resolution,
+                    width: mapInfo.width,
+                    height: mapInfo.height,
+                    origin_x: mapInfo.origin_x,
+                    origin_y: mapInfo.origin_y
+                });
+                if (mapImage.width !== mapInfo.width || mapImage.height !== mapInfo.height) {
+                    console.warn("WARNING: Image dimensions don't match mapInfo!",
+                        "Image:", mapImage.width, "x", mapImage.height,
+                        "MapInfo:", mapInfo.width, "x", mapInfo.height);
+                }
+            }
             isMapLoaded = true;
             if (loadingOverlay) loadingOverlay.style.display = 'none';
             resizeCanvas();
@@ -311,7 +639,10 @@ document.addEventListener('DOMContentLoaded', () => {
             robotPose = data.pose;
             poseDisplay.textContent = `X: ${robotPose.x.toFixed(2)} Y: ${robotPose.y.toFixed(2)} T: ${robotPose.theta.toFixed(2)}`;
         }
-        if (data.map_info && !mapInfo) mapInfo = data.map_info;
+        // Always update mapInfo to ensure sync with backend
+        if (data.map_info) {
+            mapInfo = data.map_info;
+        }
         draw();
     }
 
@@ -344,6 +675,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 3. Apply CSS style to scale visual presentation (can be > 100%)
         canvas.style.width = `${finalWidth}px`;
         canvas.style.height = `${finalHeight}px`;
+
+        // 4. Track scale factor for consistent icon sizing
+        canvasScale = finalWidth / canvas.width;
 
         draw();
     }
@@ -413,27 +747,61 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.save();
         ctx.translate(u, v);
         ctx.rotate(-theta);
+
+        // Scale-independent size (constant visual size regardless of map zoom)
+        const visualSize = 24; // Desired visual size in screen pixels
+        const size = canvasScale > 0 ? visualSize / canvasScale : visualSize;
+        const lineWidth = canvasScale > 0 ? 2 / canvasScale : 2;
+
+        // Draw arrow shape pointing right (front direction)
         ctx.beginPath();
-        const size = 15;
-        ctx.moveTo(size, 0);
-        ctx.lineTo(-size / 2, size / 2);
-        ctx.lineTo(-size / 2, -size / 2);
+        ctx.moveTo(size, 0);           // Front tip (arrow point)
+        ctx.lineTo(-size * 0.5, size * 0.6);   // Back left
+        ctx.lineTo(-size * 0.2, 0);    // Back center notch
+        ctx.lineTo(-size * 0.5, -size * 0.6);  // Back right
         ctx.closePath();
+
         ctx.fillStyle = color;
         ctx.fill();
         ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(size, 0);
+        ctx.lineWidth = lineWidth;
         ctx.stroke();
+
         ctx.restore();
     }
 
-    function worldToPixelX(x) { if (!mapInfo) return 0; return (x - mapInfo.origin_x) / mapInfo.resolution; }
-    function worldToPixelY(y) { if (!mapInfo) return 0; return mapInfo.height - (y - mapInfo.origin_y) / mapInfo.resolution; }
-    function pixelToWorldX(u) { if (!mapInfo) return 0; return u * mapInfo.resolution + mapInfo.origin_x; }
-    function pixelToWorldY(v) { if (!mapInfo) return 0; return (mapInfo.height - v) * mapInfo.resolution + mapInfo.origin_y; }
+    // Coordinate transformations - use actual image dimensions for accuracy
+    // These functions convert between world coordinates (meters) and pixel coordinates
+    function getMapHeight() {
+        // Prefer actual image height, fall back to mapInfo
+        if (isMapLoaded && mapImage.height > 0) return mapImage.height;
+        if (mapInfo && mapInfo.height > 0) return mapInfo.height;
+        return 0;
+    }
+
+    function worldToPixelX(x) {
+        if (!mapInfo || mapInfo.resolution <= 0) return 0;
+        return (x - mapInfo.origin_x) / mapInfo.resolution;
+    }
+
+    function worldToPixelY(y) {
+        if (!mapInfo || mapInfo.resolution <= 0) return 0;
+        const imgHeight = getMapHeight();
+        if (imgHeight <= 0) return 0;
+        return imgHeight - (y - mapInfo.origin_y) / mapInfo.resolution;
+    }
+
+    function pixelToWorldX(u) {
+        if (!mapInfo || mapInfo.resolution <= 0) return 0;
+        return u * mapInfo.resolution + mapInfo.origin_x;
+    }
+
+    function pixelToWorldY(v) {
+        if (!mapInfo || mapInfo.resolution <= 0) return 0;
+        const imgHeight = getMapHeight();
+        if (imgHeight <= 0) return 0;
+        return (imgHeight - v) * mapInfo.resolution + mapInfo.origin_y;
+    }
 
     function handleMouseDown(e) {
         if (!isMapLoaded || !mapInfo) return;
@@ -635,11 +1003,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 tr.innerHTML = `
                     <td style="display:flex; align-items:center; gap:5px;">
                          <div style="display:flex; flex-direction:column; gap:2px;">
-                             <button onclick="movePoint(${index}, -1)" class="btn-sm" style="font-size:0.6rem; padding:0 4px; line-height:1;" ${index === 0 ? 'disabled' : ''}>▲</button>
-                             <button onclick="movePoint(${index}, 1)" class="btn-sm" style="font-size:0.6rem; padding:0 4px; line-height:1;" ${index === currentPatrolPoints.length - 1 ? 'disabled' : ''}>▼</button>
+                             <button onclick="movePoint(${index}, -1)" class="btn-sm" style="font-size:0.7rem; padding:0 4px; line-height:1;" ${index === 0 ? 'disabled' : ''}>▲</button>
+                             <button onclick="movePoint(${index}, 1)" class="btn-sm" style="font-size:0.7rem; padding:0 4px; line-height:1;" ${index === currentPatrolPoints.length - 1 ? 'disabled' : ''}>▼</button>
                          </div>
                         <button onmousedown="setHighlight('${p.id}')" onmouseup="clearHighlight()" onmouseleave="clearHighlight()" 
-                            class="btn-secondary" style="width:100%; text-align:left; font-size:0.9rem; margin:0;">
+                            class="btn-secondary" style="width:100%; text-align:left; font-size:0.85rem; margin:0;">
                             📍 ${p.name || 'Unnamed Point'}
                         </button>
                     </td>
@@ -994,7 +1362,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.innerHTML = `
                      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                          <span style="color:#26c6da; font-weight:bold;">${r.point_name}</span>
-                         <span style="font-size:0.75rem; color:#888;">${r.timestamp}</span>
+                         <span style="font-size:0.7rem; color:#888;">${r.timestamp}</span>
                      </div>
                      ${resultHTML}
                  `;
@@ -1066,12 +1434,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span style="font-weight:bold; font-size:1.1rem; color:#fff;">Patrol Run #${run.id}</span>
                         <span style="font-size:0.8rem; background:${statusColor}; color:#000; padding:2px 8px; border-radius:4px; font-weight:bold;">${run.status}</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; font-size:0.9rem; color:#aaa;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#aaa;">
                         <span>Started: ${run.start_time}</span>
                         <span>Tokens: ${run.total_tokens || 0}</span>
                     </div>
                     <!-- <span>Robot: ${run.robot_serial || 'N/A'}</span> -->
-                    ${run.report_content ? `<div style="margin-top:10px; color:#ddd; font-size:0.9rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
+                    ${run.report_content ? `<div style="margin-top:10px; color:#ddd; font-size:0.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
                 `;
                 listContainer.appendChild(card);
             });
@@ -1089,6 +1457,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!modal) return;
 
+        // Store current run ID for PDF generation
+        window.currentReportRunId = runId;
+
         modal.style.display = 'flex';
         contentDiv.textContent = 'Loading details...';
         listDiv.innerHTML = '';
@@ -1100,6 +1471,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await res.json();
             const { run, inspections } = data;
+
+            // Store data for PDF generation
+            window.currentReportData = { run, inspections };
 
             // Populate Report
             contentDiv.textContent = run.report_content || "No generated report available.";
@@ -1131,7 +1505,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div style="flex:1;">
                             <div style="font-weight:bold; color:#26c6da; margin-bottom:4px;">${ins.point_name}</div>
                             <div style="font-size:0.8rem; color:#888; margin-bottom:6px;">${ins.timestamp}</div>
-                            <div style="background:rgba(255,255,255,0.05); padding:6px; border-radius:4px; font-size:0.9rem;">
+                            <div style="background:rgba(255,255,255,0.05); padding:6px; border-radius:4px; font-size:0.85rem;">
                                 <div style="color:#aaa; font-style:italic; margin-bottom:4px;">Q: ${ins.prompt}</div>
                                 ${resultHTML}
                             </div>
@@ -1149,6 +1523,26 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closeHistoryModal = function () {
         const modal = document.getElementById('history-modal');
         if (modal) modal.style.display = 'none';
+    }
+
+    // Save PDF functionality - Server-side generation
+    window.currentReportRunId = null;
+    window.currentReportData = null;  // Store full report data for reference
+
+    window.saveReportAsPDF = function () {
+        const runId = window.currentReportRunId;
+        if (!runId) {
+            alert('No report selected. Please reopen the report.');
+            return;
+        }
+        // Trigger download from server-side PDF endpoint
+        window.location.href = `/api/report/${runId}/pdf`;
+    }
+
+    // Add event listener for PDF button
+    const btnSavePdf = document.getElementById('btn-save-pdf');
+    if (btnSavePdf) {
+        btnSavePdf.addEventListener('click', saveReportAsPDF);
     }
 
     // Close modal when clicking outside
@@ -1243,11 +1637,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 datasets: [{
                     label: 'Total Token Usage',
                     data: values,
-                    borderColor: '#26c6da',
-                    backgroundColor: 'rgba(38, 198, 218, 0.2)',
+                    borderColor: '#00f0ff',
+                    backgroundColor: 'rgba(0, 240, 255, 0.1)',
                     borderWidth: 2,
                     fill: true,
-                    tension: 0.3
+                    tension: 0.4,
+                    pointBackgroundColor: '#00f0ff',
+                    pointBorderColor: '#0a0e14',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointHoverBackgroundColor: '#00ff88',
+                    pointHoverBorderColor: '#0a0e14'
                 }]
             },
             options: {
@@ -1255,18 +1656,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 maintainAspectRatio: false,
                 scales: {
                     x: {
-                        ticks: { color: '#aaa' },
-                        grid: { color: '#333' }
+                        ticks: {
+                            color: '#5a7080',
+                            font: { family: "'JetBrains Mono', monospace", size: 10 }
+                        },
+                        grid: { color: 'rgba(0, 240, 255, 0.08)' }
                     },
                     y: {
-                        ticks: { color: '#aaa' },
-                        grid: { color: '#333' },
+                        ticks: {
+                            color: '#5a7080',
+                            font: { family: "'JetBrains Mono', monospace", size: 10 }
+                        },
+                        grid: { color: 'rgba(0, 240, 255, 0.08)' },
                         beginAtZero: true
                     }
                 },
                 plugins: {
                     legend: {
-                        labels: { color: '#fff' }
+                        labels: {
+                            color: '#a4b8c4',
+                            font: { family: "'Orbitron', sans-serif", size: 11, weight: 600 }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: '#151b23',
+                        titleColor: '#00f0ff',
+                        bodyColor: '#e8f4f8',
+                        borderColor: 'rgba(0, 240, 255, 0.25)',
+                        borderWidth: 1,
+                        cornerRadius: 4,
+                        padding: 12,
+                        titleFont: { family: "'Orbitron', sans-serif", size: 11 },
+                        bodyFont: { family: "'JetBrains Mono', monospace", size: 12 }
                     }
                 }
             }
