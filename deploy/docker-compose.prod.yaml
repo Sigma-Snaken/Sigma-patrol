@@ -1,0 +1,24 @@
+services:
+  sigma-patrol:
+    container_name: sigma-patrol
+    image: ghcr.io/sigma-snaken/sigma-patrol:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - sigma-patrol-data:/app/data
+      - sigma-patrol-logs:/app/logs
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+      - TZ=Asia/Taipei
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/state"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  sigma-patrol-data:
+  sigma-patrol-logs:
