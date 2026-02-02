@@ -122,14 +122,9 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(resizeCanvas, 50);
         } else if (tabName === 'patrol') {
             const dest = document.getElementById('patrol-left-panel');
-            const analysisPanel = dest ? dest.querySelector('.patrol-analysis-panel') : null;
             if (dest && mapContainer.parentNode !== dest) {
-                // Insert map before the analysis panel
-                if (analysisPanel) {
-                    dest.insertBefore(mapContainer, analysisPanel);
-                } else {
-                    dest.prepend(mapContainer);
-                }
+                // Append map at the end (after the analysis panel)
+                dest.appendChild(mapContainer);
             }
             setTimeout(resizeCanvas, 50);
         }
