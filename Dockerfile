@@ -19,7 +19,9 @@ COPY src /app/src
 
 # Download Chart.js for frontend (After COPY to avoid overwrite)
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /app/src/frontend/static/js && curl -L https://cdn.jsdelivr.net/npm/chart.js -o /app/src/frontend/static/js/chart.min.js
+RUN mkdir -p /app/src/frontend/static/js && \
+    curl -L https://cdn.jsdelivr.net/npm/chart.js -o /app/src/frontend/static/js/chart.min.js && \
+    curl -L https://cdn.jsdelivr.net/npm/marked/marked.min.js -o /app/src/frontend/static/js/marked.min.js
 
 # Set locale
 ENV LANG=C.UTF-8

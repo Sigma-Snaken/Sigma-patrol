@@ -1475,8 +1475,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Store data for PDF generation
             window.currentReportData = { run, inspections };
 
-            // Populate Report
-            contentDiv.textContent = run.report_content || "No generated report available.";
+            // Populate Report with Markdown rendering
+            if (run.report_content) {
+                contentDiv.innerHTML = marked.parse(run.report_content);
+            } else {
+                contentDiv.textContent = "No generated report available.";
+            }
 
             // Populate Inspections
             listDiv.innerHTML = '';
