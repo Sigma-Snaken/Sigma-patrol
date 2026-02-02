@@ -22,15 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const pointsTableQuickBody = document.querySelector('#points-table-quick tbody');
     const aiTestOutput = document.getElementById('ai-test-output');
 
-
-    // ... [Previous State & Constants code] ...
-    // Note: To avoid repeating entire file, I will assume the user has the code.
-    // However, for safety in this tool, I should replace large chunks or be careful.
-    // The replace block here is replacing the top section of `main.js` which defines elements.
-    // I also need to add the listeners.
-
-    // ... Assuming standard `State` and `Constants` blocks are unchanged ...
-
     // Event Listeners
     if (btnHome) btnHome.addEventListener('click', returnHome);
 
@@ -92,6 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.innerHTML = originalText;
         }
     }
+
+    // Event listeners for patrol/settings (functions defined later)
     if (btnSaveSettings) btnSaveSettings.addEventListener('click', saveSettings);
     if (btnStartPatrol) btnStartPatrol.addEventListener('click', startPatrol);
     if (btnStopPatrol) btnStopPatrol.addEventListener('click', stopPatrol);
@@ -401,70 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update next patrol display every minute
     setInterval(updateNextPatrolDisplay, 60000);
 
-    // ... [Previous Map, Polling, Draw, Input logic] ... 
-    // I will use replace_file_content to inject the renderPointsTable update and testAI function
-    // effectively by rewriting the end of the file or relevant functions.
-
-    // Let's rewrite `renderPointsTable` to handle both tables
-    function renderPointsTable() {
-        if (pointsTableBody) {
-            pointsTableBody.innerHTML = '';
-            currentPatrolPoints.forEach(p => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)" style="width:100px; background:rgba(0,0,0,0.2); border:none; color:white;"></td>
-                    <td style="font-family:monospace; font-size:0.8rem;">X:${p.x.toFixed(2)} Y:${p.y.toFixed(2)} T:${p.theta.toFixed(2)}</td>
-                    <td><input type="text" value="${p.prompt || ''}" onchange="updatePoint('${p.id}', 'prompt', this.value)" style="width:200px; background:rgba(0,0,0,0.2); border:none; color:white;"></td>
-                    <td><input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${p.id}', 'enabled', this.checked)"></td>
-                    <td><button onclick="deletePoint('${p.id}')" style="color:red; background:none; border:none; cursor:pointer;">del</button></td>
-                `;
-                pointsTableBody.appendChild(tr);
-            });
-        }
-
-        if (pointsTableQuickBody) {
-            pointsTableQuickBody.innerHTML = '';
-            currentPatrolPoints.forEach(p => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td style="color: ${p.enabled !== false ? 'white' : 'gray'}">${p.name || 'Unnamed'}</td>
-                    <td>
-                        <button onclick="deletePoint('${p.id}')" style="color:red; background:none; border:none; cursor:pointer;">del</button>
-                    </td>
-                `;
-                pointsTableQuickBody.appendChild(tr);
-            });
-        }
-    }
-
-    // Test AI Function
-    async function testAI() {
-        if (!aiTestOutput) return;
-        aiTestOutput.innerText = "Capturing and analyzing...";
-        aiTestOutput.style.color = "#26c6da";
-
-        try {
-            const res = await fetch('/api/test_ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}) // Use default prompt
-            });
-
-            const data = await res.json();
-            if (data.error) {
-                aiTestOutput.innerText = "Error: " + data.error;
-                aiTestOutput.style.color = "#ff3b30";
-            } else {
-                aiTestOutput.innerText = data.result;
-                aiTestOutput.style.color = "#00e676";
-            }
-        } catch (e) {
-            aiTestOutput.innerText = "Network Error: " + e;
-            aiTestOutput.style.color = "#ff3b30";
-        }
-    }
-
-    // ... [Rest of the file] ...
+    // renderPointsTable and testAI functions are defined later in the file
 
     // State
     let mapImage = new Image();
@@ -888,6 +818,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('setting-role').value = data.system_prompt || '';
         document.getElementById('setting-report-prompt').value = data.report_prompt || '';
 
+        // Multiday Report Prompt
+        const multidayPrompt = document.getElementById('setting-multiday-report-prompt');
+        if (multidayPrompt) multidayPrompt.value = data.multiday_report_prompt || '';
+
         // Turbo Mode
         const turboCheckbox = document.getElementById('setting-turbo-mode');
         if (turboCheckbox) turboCheckbox.checked = data.turbo_mode === true;
@@ -917,6 +851,7 @@ document.addEventListener('DOMContentLoaded', () => {
             timezone: document.getElementById('setting-timezone').value,
             system_prompt: document.getElementById('setting-role').value,
             report_prompt: document.getElementById('setting-report-prompt').value,
+            multiday_report_prompt: document.getElementById('setting-multiday-report-prompt')?.value || '',
             turbo_mode: document.getElementById('setting-turbo-mode').checked,
             enable_video_recording: document.getElementById('setting-enable-video').checked,
             video_prompt: document.getElementById('setting-video-prompt').value,
@@ -1602,6 +1537,109 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) window.closeHistoryModal();
         });
+    }
+
+
+    // --- REPORT GENERATION LOGIC ---
+    window.closeGeneratedReport = function () {
+        const container = document.getElementById('generated-report-container');
+        if (container) container.style.display = 'none';
+    }
+
+    // Store generated report data for PDF export
+    window.generatedReportData = null;
+
+    window.saveGeneratedReportAsPDF = function () {
+        const startDate = document.getElementById('history-start-date')?.value;
+        const endDate = document.getElementById('history-end-date')?.value;
+
+        if (!startDate || !endDate) {
+            alert('No date range selected.');
+            return;
+        }
+
+        // Trigger download from server-side PDF endpoint
+        window.location.href = `/api/reports/generate/pdf?start_date=${startDate}&end_date=${endDate}`;
+    }
+
+    async function generateReport() {
+        const startInput = document.getElementById('history-start-date');
+        const endInput = document.getElementById('history-end-date');
+        const btn = document.getElementById('btn-generate-report');
+        const container = document.getElementById('generated-report-container');
+        const contentDiv = document.getElementById('generated-report-content');
+
+        if (!startInput.value || !endInput.value) {
+            alert("Please select a date range.");
+            return;
+        }
+
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon">⏳</span> Generating...';
+
+        if (container) container.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/reports/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_date: startInput.value,
+                    end_date: endInput.value
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || "Failed to generate report");
+            }
+
+            // Display Report
+            if (container) {
+                container.style.display = 'block';
+                contentDiv.innerHTML = marked.parse(data.report);
+
+                // Update stats
+                document.getElementById('report-prompt-tokens').innerText = data.usage.prompt_token_count || 0;
+                document.getElementById('report-completion-tokens').innerText = data.usage.candidates_token_count || 0;
+                document.getElementById('report-total-tokens').innerText = data.usage.total_token_count || 0;
+            }
+
+            // Refresh token stats chart if visible? maybe not needed immediately.
+
+        } catch (e) {
+            alert("Error: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+
+    const btnGenerateReport = document.getElementById('btn-generate-report');
+    if (btnGenerateReport) {
+        btnGenerateReport.addEventListener('click', generateReport);
+
+        // Initialize dates
+        const end = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - 7); // Last 7 days
+
+        const formatDate = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
+        const startInput = document.getElementById('history-start-date');
+        const endInput = document.getElementById('history-end-date');
+
+        if (startInput && endInput) {
+            startInput.value = formatDate(start);
+            endInput.value = formatDate(end);
+        }
     }
 
     // --- STATS LOGIC ---

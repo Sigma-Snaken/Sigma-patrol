@@ -11,11 +11,11 @@ from PIL import Image
 # New Modules
 from config import *
 from utils import load_json, save_json
-from database import init_db, get_db_connection
+from database import init_db, get_db_connection, save_generated_report
 from robot_service import robot_service
 from patrol_service import patrol_service
 from ai_service import ai_service
-from pdf_service import generate_patrol_report
+from pdf_service import generate_patrol_report, generate_analysis_report
 
 import logging
 
@@ -177,13 +177,22 @@ def handle_settings():
     if request.method == 'POST':
         new_settings = request.json
         try:
-            save_json(SETTINGS_FILE, new_settings)
+            # Load existing settings to preserve keys not in prompt
+            current_settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+            current_settings.update(new_settings)
+            
+            save_json(SETTINGS_FILE, current_settings)
             return jsonify({"status": "saved"})
         except Exception as e:
             logging.error(f"Failed to save settings: {e}")
             return jsonify({"error": f"Failed to save settings: {str(e)}"}), 500
     else:
-        return jsonify(load_json(SETTINGS_FILE, DEFAULT_SETTINGS))
+        # Load file settings, but ensure all keys from DEFAULT_SETTINGS exist
+        file_settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+        # Merge: Default < File
+        final_settings = DEFAULT_SETTINGS.copy()
+        final_settings.update(file_settings)
+        return jsonify(final_settings)
 
 @app.route('/api/points', methods=['GET', 'POST', 'DELETE'])
 def handle_points():
@@ -405,22 +414,157 @@ def get_token_usage_stats():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Aggregate total_tokens by day (YYYY-MM-DD)
-    # Ensure backward compatibility if total_tokens is NULL (use 0)
-    query = '''
+    # 1. Get stats from patrol_runs
+    query_runs = '''
         SELECT substr(start_time, 1, 10) as date, SUM(COALESCE(total_tokens, 0))
         FROM patrol_runs
         WHERE start_time IS NOT NULL
         GROUP BY substr(start_time, 1, 10)
-        ORDER BY date ASC
     '''
+    cursor.execute(query_runs)
+    run_rows = cursor.fetchall()
     
-    cursor.execute(query)
-    rows = cursor.fetchall()
+    # 2. Get stats from generated_reports
+    query_reports = '''
+        SELECT substr(timestamp, 1, 10) as date, SUM(COALESCE(total_tokens, 0))
+        FROM generated_reports
+        WHERE timestamp IS NOT NULL
+        GROUP BY substr(timestamp, 1, 10)
+    '''
+    cursor.execute(query_reports)
+    report_rows = cursor.fetchall()
+    
     conn.close()
     
-    results = [{"date": row[0], "total": row[1]} for row in rows if row[0]]
+    # Merge results
+    usage_map = {}
+    
+    for row in run_rows:
+        if row[0]:
+            usage_map[row[0]] = usage_map.get(row[0], 0) + row[1]
+            
+    for row in report_rows:
+        if row[0]:
+            usage_map[row[0]] = usage_map.get(row[0], 0) + row[1]
+    
+    # Sort by date
+    results = [{"date": k, "total": v} for k, v in sorted(usage_map.items())]
     return jsonify(results)
+
+
+@app.route('/api/reports/generate', methods=['POST'])
+def generate_report_route():
+    data = request.json
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    user_prompt = data.get('prompt')
+    
+    if not start_date or not end_date:
+        return jsonify({"error": "Start date and end date are required"}), 400
+        
+    try:
+        # 1. Fetch Inspection Results
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Adjust end_date to include the full day (e.g. 2025-01-01 -> 2025-01-01 23:59:59)
+        # Assuming inputs are YYYY-MM-DD
+        query_start = f"{start_date} 00:00:00"
+        query_end = f"{end_date} 23:59:59"
+        
+        cursor.execute('''
+            SELECT point_name, result, timestamp, is_ng, description FROM (
+                SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description 
+                FROM inspection_results 
+                WHERE timestamp BETWEEN ? AND ?
+                ORDER BY timestamp ASC
+            )
+        ''', (query_start, query_end))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+             return jsonify({"error": "No inspection data found for this period"}), 404
+             
+        # 2. Format Context
+        context = f"Inspection Report Data ({start_date} to {end_date}):\n\n"
+        for row in rows:
+            status = "NG" if row['is_ng'] else "OK"
+            context += f"- [{row['timestamp']}] Point: {row['point_name']} | Status: {status} | Details: {row['description'] or row['result']}\n"
+            
+        # 3. Call AI Service
+        if not user_prompt:
+             settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+             # Use get() but fallback to DEFAULT_SETTINGS value explicitly if key missing in file
+             default_prompt = DEFAULT_SETTINGS.get('multiday_report_prompt', "Generate a concise summary report.")
+             final_prompt = settings.get('multiday_report_prompt', default_prompt)
+        else:
+             final_prompt = user_prompt
+
+        response = ai_service.generate_report(f"{final_prompt}\n\nContext:\n{context}")
+        
+        # 4. Save to Database
+        report_id = save_generated_report(start_date, end_date, response['result'], response['usage'])
+        
+        return jsonify({
+            "id": report_id,
+            "report": response['result'],
+            "usage": response['usage']
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/reports/generate/pdf', methods=['GET'])
+def generate_multiday_report_pdf():
+    """Generate PDF for multi-day analysis report from saved report."""
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    if not start_date or not end_date:
+        return jsonify({"error": "Start date and end date are required"}), 400
+
+    try:
+        # Fetch the most recent generated report for this date range
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT report_content FROM generated_reports
+            WHERE start_date = ? AND end_date = ?
+            ORDER BY timestamp DESC LIMIT 1
+        ''', (start_date, end_date))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row or not row['report_content']:
+            return jsonify({"error": "No report found for this date range. Please generate a report first."}), 404
+
+        report_content = row['report_content']
+
+        # Generate PDF
+        pdf_bytes = generate_analysis_report(
+            content=report_content,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # Return PDF file
+        filename = f'analysis_report_{start_date}_{end_date}.pdf'
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logging.error(f"Failed to generate PDF report: {e}")
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+
 
 # --- History APIs ---
 

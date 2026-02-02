@@ -469,8 +469,8 @@ def markdown_to_flowables(markdown_text, styles):
     return flowables if flowables else [Paragraph("No content.", styles['CJKNormal'])]
 
 
-def parse_ai_response(response_str):
-    """Parse AI response to extract is_NG and Description"""
+def parse_inspection_result(response_str):
+    """Parse inspection result string to extract is_NG and Description."""
     is_ng = False
     description = response_str or ''
 
@@ -484,6 +484,73 @@ def parse_ai_response(response_str):
             is_ng = 'ng' in response_str.lower()
 
     return is_ng, description
+
+
+def generate_analysis_report(content, start_date, end_date):
+    """
+    Generate PDF from markdown content for multi-day analysis report.
+
+    Args:
+        content: Markdown formatted report content
+        start_date: Report period start date
+        end_date: Report period end date
+
+    Returns:
+        PDF bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=25*mm
+    )
+
+    styles = get_styles()
+    story = []
+
+    # === Title Page ===
+    story.append(Spacer(1, 30*mm))
+    story.append(Paragraph("SIGMA PATROL", styles['ReportTitle']))
+    story.append(Paragraph("Analysis Report", styles['ReportTitle']))
+    story.append(Spacer(1, 10*mm))
+    story.append(Paragraph(
+        f"Report Period: {start_date} to {end_date}",
+        styles['CJKNormal']
+    ))
+    story.append(Paragraph(
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        styles['SmallText']
+    ))
+    story.append(Spacer(1, 20*mm))
+
+    # === Report Content (Markdown) ===
+    story.append(Paragraph("Analysis Report", styles['SectionHeader']))
+
+    if content:
+        md_flowables = markdown_to_flowables(content, styles)
+        story.extend(md_flowables)
+    else:
+        story.append(Paragraph("No content.", styles['CJKNormal']))
+
+    # Page number callback
+    def add_page_number(canvas, doc):
+        canvas.saveState()
+        page_num = canvas.getPageNumber()
+        canvas.setFont(CJK_FONT, 8)
+        canvas.setFillColor(MUTED_TEXT)
+        canvas.drawCentredString(A4[0] / 2, 15*mm, f"Page {page_num}")
+        canvas.drawCentredString(A4[0] / 2, 10*mm, f"SIGMA PATROL System - Analysis Report ({start_date} to {end_date})")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
+
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    return pdf_bytes
 
 
 def generate_patrol_report(run_id):
@@ -575,7 +642,7 @@ def generate_patrol_report(run_id):
         for ins in inspections:
             inspection_elements = []
 
-            is_ng, description = parse_ai_response(ins.get('ai_response', ''))
+            is_ng, description = parse_inspection_result(ins.get('ai_response', ''))
             status_color = NG_RED if is_ng else OK_GREEN
             status_text = 'NG' if is_ng else 'OK'
 

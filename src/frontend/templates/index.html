@@ -281,7 +281,42 @@
             <div id="view-history" class="tab-content" style="display: none;">
                 <div class="header">
                     <h1>Patrol History</h1>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="date" id="history-start-date" title="Start Date">
+                        <span style="color: var(--text-muted);">to</span>
+                        <input type="date" id="history-end-date" title="End Date">
+                        <button id="btn-generate-report" class="btn-premium" style="padding: 8px 16px;">
+                            <span class="icon">✨</span> Generate Report
+                        </button>
+                    </div>
                 </div>
+
+                <!-- Report Result Container -->
+                <div id="generated-report-container" class="glass-panel"
+                    style="display: none; margin-bottom: 20px; border: 1px solid var(--cyan-dim);">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+                        <h3 style="margin: 0; color: var(--cyan-glow);">Analysis Report</h3>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button onclick="saveGeneratedReportAsPDF()" class="btn-primary" style="padding: 6px 12px; font-size: 11px;">
+                                📄 Save PDF
+                            </button>
+                            <button onclick="closeGeneratedReport()"
+                                style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 18px;">&times;</button>
+                        </div>
+                    </div>
+                    <div id="generated-report-content" class="markdown-content"
+                        style="max-height: 300px; overflow-y: auto; color: var(--text-primary);"></div>
+                    <div class="stats-footer"
+                        style="margin-top: 12px; font-size: 11px; color: var(--text-muted); display: flex; gap: 12px;">
+                        <span>Prompt Tokens: <b id="report-prompt-tokens"
+                                style="color: var(--text-normal);">0</b></span>
+                        <span>output Tokens: <b id="report-completion-tokens"
+                                style="color: var(--text-normal);">0</b></span>
+                        <span>Total Cost: <b id="report-total-tokens" style="color: var(--cyan-dim);">0</b></span>
+                    </div>
+                </div>
+
                 <div id="history-list" class="glass-panel"></div>
             </div>
 
@@ -389,9 +424,14 @@
                             placeholder="Instructions for video analysis..."></textarea>
                     </div>
                     <div class="form-group">
-                        <label>Report Prompt</label>
+                        <label>Report Prompt (Single Run)</label>
                         <textarea id="setting-report-prompt" rows="3"
-                            placeholder="Custom instructions for report generation..."></textarea>
+                            placeholder="Custom instructions for single patrol report generation..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Multiday Report Prompt (Date Range)</label>
+                        <textarea id="setting-multiday-report-prompt" rows="3"
+                            placeholder="Custom instructions for aggregated report generation..."></textarea>
                     </div>
                     <button class="btn-primary" id="btn-save-settings"
                         style="align-self: flex-start; margin-top: 8px;">Save Settings</button>

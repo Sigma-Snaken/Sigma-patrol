@@ -71,6 +71,20 @@ def update_run_tokens(run_id):
               totals['total_tokens'], run_id))
 
 
+def save_generated_report(start_date, end_date, content, usage):
+    """Save AI generated report to database."""
+    with db_context() as (conn, cursor):
+        cursor.execute('''
+            INSERT INTO generated_reports 
+            (start_date, end_date, report_content, prompt_tokens, candidate_tokens, total_tokens, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        ''', (start_date, end_date, content, 
+              usage.get('prompt_token_count', 0),
+              usage.get('candidates_token_count', 0),
+              usage.get('total_token_count', 0)))
+        return cursor.lastrowid
+
+
 def init_db():
     """Initialize database schema with migrations."""
     conn = get_db_connection()
@@ -92,6 +106,19 @@ def init_db():
             total_tokens INTEGER,
             video_path TEXT,
             video_analysis TEXT
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS generated_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_date TEXT,
+            end_date TEXT,
+            report_content TEXT,
+            prompt_tokens INTEGER,
+            candidate_tokens INTEGER,
+            total_tokens INTEGER,
+            timestamp TEXT
         )
     ''')
 

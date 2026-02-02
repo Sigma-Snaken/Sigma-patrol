@@ -47,7 +47,8 @@ DEFAULT_SETTINGS = {
 1.  **結果 (Result)：** 填寫「**O**」（表示符合/正常）或「**X**」（表示不符合/異常）。
 2.  **備註/異常說明 (Notes)：** 詳細說明任何標記為「X」的項目，或需要注意的事項。
 
-**請以一個完整的 Markdown 表格呈現最終的巡檢報告。**"""
+**請以一個完整的 Markdown 表格呈現最終的巡檢報告。**""",
+    "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies."
 }
 
 def ensure_dirs():
