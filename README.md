@@ -11,17 +11,24 @@ An autonomous robot patrol system integrating **Kachaka Robot** with **Google Ge
 
 - **Autonomous Patrol** - Define waypoints and let the robot navigate automatically
 - **AI-Powered Inspection** - Gemini Vision analyzes images for anomalies (falls, intruders, hazards)
+- **Video Recording** - Record patrol footage with AI video analysis
 - **Real-time Dashboard** - Live map, robot position, battery, dual camera streams
 - **Scheduled Patrols** - Set recurring patrol times with day-of-week filtering
-- **PDF Reports** - Generate downloadable patrol reports with images and AI analysis
+- **Multi-day Analysis Reports** - Generate AI-powered analysis reports for any date range
+- **Unified PDF Reports** - Server-side PDF generation with full Markdown support (tables, lists, code blocks)
 - **Manual Control** - Web-based remote control with D-pad navigation
 - **History & Analytics** - Browse past patrols with token usage statistics
+- **Chinese Language Support** - Full CJK font support in PDF reports
 
 ## Quick Start (Docker)
 
 ```bash
-# Start the service
-docker-compose up --build -d
+# Pull and run from GitHub Container Registry
+docker pull ghcr.io/sigma-snaken/sigma-patrol:latest
+docker run -d -p 5000:5000 -v sigma-data:/app/data ghcr.io/sigma-snaken/sigma-patrol:latest
+
+# Or use docker-compose
+docker-compose up -d
 
 # View logs
 docker-compose logs -f
@@ -37,6 +44,12 @@ Access the web interface at [http://localhost:5000](http://localhost:5000)
 4. Set your **Timezone**
 5. Click **Save Settings**
 
+## Screenshots
+
+| Patrol Dashboard | History & Reports |
+|------------------|-------------------|
+| Live map with robot position, camera feeds, and patrol status | Browse past patrols and generate multi-day analysis reports |
+
 ## Project Structure
 
 ```
@@ -47,9 +60,9 @@ Sigma-patrol/
 │   │   ├── patrol_service.py   # Patrol orchestration
 │   │   ├── robot_service.py    # Kachaka robot interface
 │   │   ├── ai_service.py       # Gemini AI integration
-│   │   ├── pdf_service.py      # PDF report generation
+│   │   ├── pdf_service.py      # PDF report generation (ReportLab)
 │   │   ├── database.py         # SQLite management
-│   │   ├── config.py           # Configuration paths
+│   │   ├── config.py           # Configuration & defaults
 │   │   ├── utils.py            # Utilities (JSON, time, etc.)
 │   │   ├── logger.py           # Timezone-aware logging
 │   │   └── requirements.txt    # Python dependencies
@@ -74,7 +87,9 @@ Sigma-patrol/
 ├── tools/                      # Debug & inspection utilities
 ├── tests/                      # Unit tests
 ├── Dockerfile
-└── docker-compose.yml
+├── docker-compose.yml
+└── .github/workflows/          # CI/CD pipelines
+    └── docker-publish.yaml     # Auto-build Docker images
 ```
 
 ## Local Development
@@ -101,6 +116,7 @@ python src/backend/app.py
 | `/api/move` | POST | Move to coordinates `{x, y, theta}` |
 | `/api/manual_control` | POST | D-pad control `{action}` |
 | `/api/return_home` | POST | Return to charging station |
+| `/api/cancel_command` | POST | Cancel current movement |
 | `/api/camera/front` | GET | Front camera MJPEG stream |
 | `/api/camera/back` | GET | Back camera MJPEG stream |
 
@@ -111,6 +127,7 @@ python src/backend/app.py
 | `/api/patrol/stop` | POST | Stop patrol |
 | `/api/patrol/status` | GET | Current patrol status |
 | `/api/patrol/schedule` | GET/POST | Manage scheduled patrols |
+| `/api/patrol/schedule/<id>` | PUT/DELETE | Update or delete schedule |
 | `/api/patrol/results` | GET | Recent inspection results |
 
 ### Points & Settings
@@ -118,6 +135,8 @@ python src/backend/app.py
 |----------|--------|-------------|
 | `/api/points` | GET/POST/DELETE | Manage patrol waypoints |
 | `/api/points/reorder` | POST | Reorder waypoints |
+| `/api/points/export` | GET | Export points as JSON |
+| `/api/points/import` | POST | Import points from JSON |
 | `/api/points/from_robot` | GET | Import locations from robot |
 | `/api/settings` | GET/POST | System settings |
 
@@ -126,7 +145,9 @@ python src/backend/app.py
 |----------|--------|-------------|
 | `/api/history` | GET | List all patrol runs |
 | `/api/history/<run_id>` | GET | Patrol run details |
-| `/api/report/<run_id>/pdf` | GET | Download PDF report |
+| `/api/report/<run_id>/pdf` | GET | Download single patrol PDF report |
+| `/api/reports/generate` | POST | Generate multi-day analysis report |
+| `/api/reports/generate/pdf` | GET | Download multi-day analysis PDF |
 | `/api/stats/token_usage` | GET | Token usage by date |
 
 ### AI Testing
@@ -140,12 +161,16 @@ python src/backend/app.py
 ```json
 {
     "gemini_api_key": "your-api-key",
-    "gemini_model": "gemini-2.5-flash",
+    "gemini_model": "gemini-2.0-flash",
     "robot_ip": "192.168.50.133:26400",
     "timezone": "Asia/Taipei",
     "system_prompt": "You are a security robot...",
     "report_prompt": "Generate a patrol summary...",
-    "turbo_mode": false
+    "multiday_report_prompt": "Generate a comprehensive analysis...",
+    "turbo_mode": false,
+    "enable_video_recording": false,
+    "video_prompt": "Analyze this patrol video...",
+    "enable_idle_stream": true
 }
 ```
 
@@ -186,9 +211,28 @@ python src/backend/app.py
       └──────────┘ └──────────┘
 ```
 
-## Turbo Mode
+## Key Features Explained
 
+### Turbo Mode
 Enable **Turbo Mode** in settings to queue AI inspections asynchronously. This allows the robot to continue moving while images are being analyzed, reducing total patrol time.
+
+### Video Recording
+When enabled, the system records video during patrols for later AI analysis. Configure the video analysis prompt in settings to customize what the AI looks for in recorded footage.
+
+### Multi-day Analysis Reports
+Generate comprehensive reports spanning any date range:
+1. Go to **History** tab
+2. Select start and end dates
+3. Click **Generate Report**
+4. Download as PDF with full Markdown formatting
+
+### PDF Report Features
+- Professional layout with consistent styling
+- Full Markdown support (headers, tables, lists, code blocks, blockquotes)
+- Chinese/CJK character support (STSong-Light font)
+- Embedded inspection images
+- Page numbers and footers
+- Server-side generation (no browser dependency)
 
 ## Troubleshooting
 
@@ -205,6 +249,21 @@ Enable **Turbo Mode** in settings to queue AI inspections asynchronously. This a
 **PDF Generation Failed**
 - Check `logs/app.log` for errors
 - Verify images exist in `data/report/images/`
+- For Chinese text issues, ensure CJK fonts are available
+
+**Camera Stream Not Loading**
+- Check if `enable_idle_stream` is enabled in settings
+- Verify robot camera is accessible
+- Try refreshing the page
+
+## CI/CD
+
+Docker images are automatically built and pushed to GitHub Container Registry on every push to `main`:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/sigma-snaken/sigma-patrol:latest
+```
 
 ## License
 
