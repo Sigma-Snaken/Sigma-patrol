@@ -1682,7 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Create a map of existing data
             const dataMap = {};
             data.forEach(d => {
-                dataMap[d.date] = d.total;
+                dataMap[d.date] = { input: d.input || 0, output: d.output || 0, total: d.total || 0 };
             });
 
             // Generate full date range with zero filling
@@ -1697,15 +1697,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 filledData.push({
                     date: dateStr,
-                    total: dataMap[dateStr] || 0
+                    input: dataMap[dateStr]?.input || 0,
+                    output: dataMap[dateStr]?.output || 0,
+                    total: dataMap[dateStr]?.total || 0
                 });
 
                 currentDate.setDate(currentDate.getDate() + 1);
             }
 
             renderChart(filledData);
+            updateStatsSummary(filledData);
         } catch (e) {
             console.error("Failed to load stats:", e);
+        }
+    }
+
+    function updateStatsSummary(data) {
+        const totalInput = data.reduce((sum, d) => sum + d.input, 0);
+        const totalOutput = data.reduce((sum, d) => sum + d.output, 0);
+        const totalAll = data.reduce((sum, d) => sum + d.total, 0);
+
+        const summaryEl = document.getElementById('stats-summary');
+        if (summaryEl) {
+            summaryEl.innerHTML = `
+                <div class="stat-item">
+                    <span class="stat-label">Input Tokens</span>
+                    <span class="stat-value" style="color: #00e676;">${totalInput.toLocaleString()}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Output Tokens</span>
+                    <span class="stat-value" style="color: #ff9800;">${totalOutput.toLocaleString()}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Total Tokens</span>
+                    <span class="stat-value" style="color: #00f0ff;">${totalAll.toLocaleString()}</span>
+                </div>
+            `;
         }
     }
 
@@ -1717,32 +1744,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const labels = data.map(d => d.date);
-        const values = data.map(d => d.total);
+        const inputValues = data.map(d => d.input);
+        const outputValues = data.map(d => d.output);
+        const totalValues = data.map(d => d.total);
 
         tokenChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
-                datasets: [{
-                    label: 'Total Token Usage',
-                    data: values,
-                    borderColor: '#00f0ff',
-                    backgroundColor: 'rgba(0, 240, 255, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4,
-                    pointBackgroundColor: '#00f0ff',
-                    pointBorderColor: '#0a0e14',
-                    pointBorderWidth: 2,
-                    pointRadius: 4,
-                    pointHoverRadius: 6,
-                    pointHoverBackgroundColor: '#00ff88',
-                    pointHoverBorderColor: '#0a0e14'
-                }]
+                datasets: [
+                    {
+                        label: 'Input Tokens',
+                        data: inputValues,
+                        borderColor: '#00e676',
+                        backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointBackgroundColor: '#00e676',
+                        pointBorderColor: '#0a0e14',
+                        pointBorderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Output Tokens',
+                        data: outputValues,
+                        borderColor: '#ff9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointBackgroundColor: '#ff9800',
+                        pointBorderColor: '#0a0e14',
+                        pointBorderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Total Tokens',
+                        data: totalValues,
+                        borderColor: '#00f0ff',
+                        backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: '#00f0ff',
+                        pointBorderColor: '#0a0e14',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }
+                ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
                 scales: {
                     x: {
                         ticks: {

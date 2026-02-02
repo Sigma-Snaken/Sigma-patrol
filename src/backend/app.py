@@ -410,45 +410,63 @@ def get_patrol_results():
 
 @app.route('/api/stats/token_usage', methods=['GET'])
 def get_token_usage_stats():
-    # Optional filtering could be added here
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # 1. Get stats from patrol_runs
+
+    # 1. Get stats from patrol_runs (includes inspection_results tokens via update_run_tokens)
     query_runs = '''
-        SELECT substr(start_time, 1, 10) as date, SUM(COALESCE(total_tokens, 0))
+        SELECT substr(start_time, 1, 10) as date,
+               SUM(COALESCE(prompt_tokens, 0)) as input,
+               SUM(COALESCE(candidate_tokens, 0)) as output,
+               SUM(COALESCE(total_tokens, 0)) as total
         FROM patrol_runs
         WHERE start_time IS NOT NULL
         GROUP BY substr(start_time, 1, 10)
     '''
     cursor.execute(query_runs)
     run_rows = cursor.fetchall()
-    
+
     # 2. Get stats from generated_reports
     query_reports = '''
-        SELECT substr(timestamp, 1, 10) as date, SUM(COALESCE(total_tokens, 0))
+        SELECT substr(timestamp, 1, 10) as date,
+               SUM(COALESCE(prompt_tokens, 0)) as input,
+               SUM(COALESCE(candidate_tokens, 0)) as output,
+               SUM(COALESCE(total_tokens, 0)) as total
         FROM generated_reports
         WHERE timestamp IS NOT NULL
         GROUP BY substr(timestamp, 1, 10)
     '''
     cursor.execute(query_reports)
     report_rows = cursor.fetchall()
-    
+
     conn.close()
-    
+
     # Merge results
     usage_map = {}
-    
+
     for row in run_rows:
-        if row[0]:
-            usage_map[row[0]] = usage_map.get(row[0], 0) + row[1]
-            
+        if row['date']:
+            date = row['date']
+            if date not in usage_map:
+                usage_map[date] = {'input': 0, 'output': 0, 'total': 0}
+            usage_map[date]['input'] += row['input'] or 0
+            usage_map[date]['output'] += row['output'] or 0
+            usage_map[date]['total'] += row['total'] or 0
+
     for row in report_rows:
-        if row[0]:
-            usage_map[row[0]] = usage_map.get(row[0], 0) + row[1]
-    
-    # Sort by date
-    results = [{"date": k, "total": v} for k, v in sorted(usage_map.items())]
+        if row['date']:
+            date = row['date']
+            if date not in usage_map:
+                usage_map[date] = {'input': 0, 'output': 0, 'total': 0}
+            usage_map[date]['input'] += row['input'] or 0
+            usage_map[date]['output'] += row['output'] or 0
+            usage_map[date]['total'] += row['total'] or 0
+
+    # Sort by date and format results
+    results = [
+        {"date": k, "input": v['input'], "output": v['output'], "total": v['total']}
+        for k, v in sorted(usage_map.items())
+    ]
     return jsonify(results)
 
 
