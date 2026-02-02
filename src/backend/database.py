@@ -89,7 +89,9 @@ def init_db():
             token_usage TEXT,
             prompt_tokens INTEGER,
             candidate_tokens INTEGER,
-            total_tokens INTEGER
+            total_tokens INTEGER,
+            video_path TEXT,
+            video_analysis TEXT
         )
     ''')
 
@@ -131,6 +133,7 @@ def _run_migrations(cursor):
         ('token_usage', 'patrol_runs', ['token_usage TEXT']),
         ('prompt_tokens', 'patrol_runs', ['prompt_tokens INTEGER', 'candidate_tokens INTEGER', 'total_tokens INTEGER']),
         ('robot_moving_status', 'inspection_results', ['robot_moving_status TEXT']),
+        ('video_path', 'patrol_runs', ['video_path TEXT', 'video_analysis TEXT']),
     ]
 
     for check_col, table, columns in migrations:

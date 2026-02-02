@@ -17,6 +17,7 @@ from database import get_db_connection, db_context, update_run_tokens
 from robot_service import robot_service
 from ai_service import ai_service, parse_ai_response
 from logger import get_logger
+from video_recorder import VideoRecorder
 
 logger = get_logger("patrol_service", "patrol_service.log")
 
@@ -321,6 +322,18 @@ class PatrolService:
         run_folder = f"{self.current_run_id}_{get_filename_timestamp()}"
         run_images_dir = os.path.join(IMAGES_DIR, run_folder)
         os.makedirs(run_images_dir, exist_ok=True)
+        
+        # Video recording setup
+        recorder = None
+        video_filename = None
+        if settings.get("enable_video_recording", False):
+            video_dir = os.path.join(DATA_DIR, "report", "video")
+            os.makedirs(video_dir, exist_ok=True)
+            video_filename = os.path.join(video_dir, f"{self.current_run_id}_{get_filename_timestamp()}.mp4") # Use mp4 as tested
+            
+            self._set_status("Starting Video Recording...")
+            recorder = VideoRecorder(video_filename, robot_service.get_front_camera_image)
+            recorder.start()
 
         inspections_data = []
         turbo_mode = settings.get('turbo_mode', False)
@@ -372,13 +385,35 @@ class PatrolService:
             was_patrolling = self.is_patrolling
         final_status = "Completed" if was_patrolling else "Patrol Stopped"
 
-        if was_patrolling:
-            self._set_status("Generating Report...")
-            self._generate_report(inspections_data, settings)
+        video_path = None
+        video_analysis_text = None
 
+        if recorder:
+            recorder.stop()
+            if was_patrolling:
+                video_path = video_filename
+
+        if was_patrolling:
             self._set_status("Returning Home...")
-            robot_service.return_home()
+            try:
+                robot_service.return_home()
+            except Exception as e:
+                logger.error(f"Return home failed: {e}")
             time.sleep(2)
+
+            if recorder:
+                self._set_status("Analyzing Video...")
+                try:
+                    vid_prompt = settings.get("video_prompt", "Analyze this patrol video.")
+                    analysis_result = ai_service.analyze_video(video_filename, vid_prompt)
+                    video_analysis_text = analysis_result['result']
+                except Exception as e:
+                    logger.error(f"Video analysis failed: {e}")
+                    video_analysis_text = f"Analysis Failed: {e}"
+
+            self._set_status("Generating Report...")
+            self._generate_report(inspections_data, settings, video_analysis_text)
+
             self._set_status("Finished")
 
         # Update run status and tokens
@@ -386,8 +421,8 @@ class PatrolService:
             update_run_tokens(self.current_run_id)
             with db_context() as (conn, cursor):
                 cursor.execute(
-                    'UPDATE patrol_runs SET end_time = ?, status = ? WHERE id = ?',
-                    (get_current_time_str(), final_status, self.current_run_id)
+                    'UPDATE patrol_runs SET end_time = ?, status = ?, video_path = ?, video_analysis = ? WHERE id = ?',
+                    (get_current_time_str(), final_status, video_path, video_analysis_text, self.current_run_id)
                 )
         except Exception as e:
             logger.error(f"DB Error updating patrol status: {e}")
@@ -452,7 +487,7 @@ class PatrolService:
             self._set_status(f"Error at {point_name}")
             time.sleep(2)
 
-    def _generate_report(self, inspections_data, settings):
+    def _generate_report(self, inspections_data, settings, video_analysis_text=None):
         """Generate AI summary report."""
         if not inspections_data:
             return
@@ -466,6 +501,9 @@ class PatrolService:
 
             for item in inspections_data:
                 report_prompt += f"- Point: {item['point']}\n  Result: {item['result']}\n\n"
+
+            if video_analysis_text:
+                report_prompt += f"\n\nVideo Analysis Summary:\n{video_analysis_text}\n\n"
 
             if not custom_prompt:
                 report_prompt += "Provide a concise overview of status and anomalies."

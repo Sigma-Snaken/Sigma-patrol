@@ -229,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Days display
             const daysSpan = document.createElement('span');
             daysSpan.style.cssText = 'flex: 1; font-size: 11px; color: var(--text-secondary);';
-            const activeDays = (schedule.days || [0,1,2,3,4,5,6]).map(d => dayNames[d]).join(', ');
+            const activeDays = (schedule.days || [0, 1, 2, 3, 4, 5, 6]).map(d => dayNames[d]).join(', ');
             daysSpan.textContent = schedule.days && schedule.days.length < 7 ? activeDays : 'Every day';
 
             // Toggle switch
@@ -339,7 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
         enabledSchedules.forEach(schedule => {
             const [hours, mins] = schedule.time.split(':').map(Number);
             const scheduleMinutes = hours * 60 + mins;
-            const scheduleDays = schedule.days || [0,1,2,3,4,5,6];
+            const scheduleDays = schedule.days || [0, 1, 2, 3, 4, 5, 6];
 
             // Check each day starting from today
             for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
@@ -390,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update next patrol display when schedule changes
     const originalRenderScheduleList = renderScheduleList;
-    renderScheduleList = function() {
+    renderScheduleList = function () {
         originalRenderScheduleList();
         updateNextPatrolDisplay();
     };
@@ -477,6 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let dragCurrent = null;
     let currentPatrolPoints = [];
     let currentSettingsTimezone = 'UTC';
+    let currentIdleStreamEnabled = true;
 
     // Constants
     const ROBOT_COLOR = '#00bcd4';
@@ -891,6 +892,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const turboCheckbox = document.getElementById('setting-turbo-mode');
         if (turboCheckbox) turboCheckbox.checked = data.turbo_mode === true;
 
+        // Video & Stream Settings
+        const videoCheckbox = document.getElementById('setting-enable-video');
+        if (videoCheckbox) videoCheckbox.checked = data.enable_video_recording === true;
+
+        const videoPrompt = document.getElementById('setting-video-prompt');
+        if (videoPrompt) videoPrompt.value = data.video_prompt || '';
+
+        const idleStreamCheckbox = document.getElementById('setting-enable-idle-stream');
+        if (idleStreamCheckbox) {
+            idleStreamCheckbox.checked = data.enable_idle_stream !== false; // Default true
+            currentIdleStreamEnabled = idleStreamCheckbox.checked;
+        }
+
         // Handle robot_ip if element exists (will be added to HTML next)
         const ipInput = document.getElementById('setting-robot-ip');
         if (ipInput) ipInput.value = data.robot_ip || '192.168.50.133:26400';
@@ -904,6 +918,9 @@ document.addEventListener('DOMContentLoaded', () => {
             system_prompt: document.getElementById('setting-role').value,
             report_prompt: document.getElementById('setting-report-prompt').value,
             turbo_mode: document.getElementById('setting-turbo-mode').checked,
+            enable_video_recording: document.getElementById('setting-enable-video').checked,
+            video_prompt: document.getElementById('setting-video-prompt').value,
+            enable_idle_stream: document.getElementById('setting-enable-idle-stream').checked,
             robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
         };
         try {
@@ -918,6 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             currentSettingsTimezone = settings.timezone;
+            currentIdleStreamEnabled = settings.enable_idle_stream;
             alert('Settings Saved! (Robot connection may reload)');
         } catch (e) {
             alert('Failed to save settings: ' + e.message);
@@ -1297,9 +1315,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnStopPatrol.disabled = true;
             }
 
+            // Handle Camera Stream Logic
+            const shouldStream = data.is_patrolling || currentIdleStreamEnabled;
+            updateCameraStream(shouldStream);
+
             // Also reload results periodically (simple polling)
             loadResults();
         }, 1000);
+    }
+
+    let isStreamActive = true;
+    function updateCameraStream(shouldStream) {
+        if (shouldStream === isStreamActive) return;
+        isStreamActive = shouldStream;
+
+        const cams = [
+            document.querySelector('#front-camera-content img'),
+            document.querySelector('#robot-vision-content img')
+        ];
+
+        cams.forEach(img => {
+            if (img) {
+                if (shouldStream) {
+                    img.src = '/api/camera/front?t=' + new Date().getTime(); // timestamp to break cache check
+                    img.style.opacity = 1;
+                } else {
+                    img.src = ''; // Stop stream
+                    img.alt = 'Stream Paused (Idle Mode)';
+                    // We can also replace with a placeholder image or overlay
+                    img.style.opacity = 0.5;
+                }
+            }
+        });
     }
 
     // Helper to parse AI result

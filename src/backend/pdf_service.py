@@ -182,6 +182,28 @@ def get_styles():
         bulletIndent=5
     ))
 
+    # Table styles
+    styles.add(ParagraphStyle(
+        name='MDTableHeader',
+        fontName=CJK_FONT,
+        fontSize=9,
+        textColor=colors.white,
+        alignment=1,  # Center
+        leading=11,
+        spaceBefore=0,
+        spaceAfter=0
+    ))
+
+    styles.add(ParagraphStyle(
+        name='MDTableCell',
+        fontName=CJK_FONT,
+        fontSize=9,
+        textColor=colors.black,
+        leading=11,
+        spaceBefore=0,
+        spaceAfter=0
+    ))
+
     return styles
 
 
@@ -217,6 +239,85 @@ def convert_inline_markdown(text):
     return text
 
 
+def parse_markdown_table(lines, styles):
+    """Parse markdown table lines into a ReportLab Table"""
+    if not lines:
+        return None
+
+    # Parse rows
+    data = []
+    col_max_chars = [] # Track max content length per column
+
+    for line in lines:
+        # Check for separator line (e.g. |---|---|)
+        if re.match(r'^\s*\|?\s*:?-+:?\s*(\|?\s*:?-+:?\s*)+\|?\s*$', line):
+            continue
+
+        # Split by pipe
+        # Remove empty first/last if pipe exists there
+        parts = line.strip().split('|')
+        if line.strip().startswith('|'):
+            parts = parts[1:]
+        if line.strip().endswith('|'):
+            parts = parts[:-1]
+
+        row_data = []
+        for j, part in enumerate(parts):
+            cell_text = convert_inline_markdown(part.strip())
+            # Use Header style for first row
+            style = styles['MDTableHeader'] if len(data) == 0 else styles['MDTableCell']
+            row_data.append(Paragraph(cell_text, style))
+            
+            # Simple length tracking (strip tags for estimation)
+            clean_text = part.strip()
+            if j >= len(col_max_chars):
+                col_max_chars.append(len(clean_text))
+            else:
+                col_max_chars[j] = max(col_max_chars[j], len(clean_text))
+        
+        if row_data:
+            data.append(row_data)
+
+    if not data:
+        return None
+
+    # Calculate column widths
+    # Total available width = A4 width - margins (approx 170mm)
+    total_width = 170 * mm
+    num_cols = len(col_max_chars)
+    
+    if num_cols == 0:
+        return None
+
+    # Heuristic: distribute width based on content length relative to total
+    total_chars = sum(col_max_chars) or 1
+    col_widths = []
+    for count in col_max_chars:
+        # Min width 15mm, but respect total
+        w = (count / total_chars) * total_width
+        col_widths.append(w)
+
+    table = Table(data, colWidths=col_widths)
+    
+    # Style the table
+    # Header row background
+    tbl_style = [
+        ('BACKGROUND', (0, 0), (-1, 0), CYAN_COLOR),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('FONTNAME', (0, 0), (-1, -1), CJK_FONT),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+    ]
+    
+    table.setStyle(TableStyle(tbl_style))
+    
+    return table
+
+
 def markdown_to_flowables(markdown_text, styles):
     """
     Convert markdown text to ReportLab flowables.
@@ -237,6 +338,19 @@ def markdown_to_flowables(markdown_text, styles):
         # Skip empty lines
         if not stripped:
             i += 1
+            continue
+
+        # Table
+        if stripped.startswith('|'):
+            table_lines = []
+            while i < len(lines) and lines[i].strip().startswith('|'):
+                table_lines.append(lines[i].strip())
+                i += 1
+            
+            table_flowable = parse_markdown_table(table_lines, styles)
+            if table_flowable:
+                flowables.append(table_flowable)
+                flowables.append(Spacer(1, 3*mm))
             continue
 
         # Code block (```)
@@ -509,9 +623,10 @@ def generate_patrol_report(run_id):
 
             result_color = '#ff3b30' if is_ng else '#00e676'
             inspection_elements.append(Paragraph(
-                f"<b>Result:</b> <font color='{result_color}'>{escape_xml(description)}</font>",
+                f"<font color='{result_color}'><b>Result:</b></font>",
                 styles['CJKNormal']
             ))
+            inspection_elements.extend(markdown_to_flowables(description, styles))
 
             inspection_elements.append(Spacer(1, 5*mm))
 

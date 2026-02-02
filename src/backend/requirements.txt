@@ -4,3 +4,4 @@ numpy
 pillow
 google-generativeai
 reportlab
+opencv-python-headless

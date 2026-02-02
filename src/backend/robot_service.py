@@ -138,7 +138,7 @@ class RobotService:
         with self.client_lock:
             client = self.client
         if client:
-            client.return_home()
+            return client.return_home()
 
     def cancel_command(self):
         with self.client_lock:

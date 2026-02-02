@@ -205,5 +205,50 @@ class AIService:
             logger.error(f"Gemini Report Error: {e}")
             raise
 
-
+    def analyze_video(self, video_path, user_prompt):
+        """
+        Analyze video content using Gemini.
+        
+        Args:
+            video_path: Path to video file
+            user_prompt: Analysis prompt
+            
+        Returns:
+            dict with 'result' (text) and 'usage' (token counts)
+        """
+        self._configure()
+        
+        if not self.model:
+             raise Exception("AI Model not configured.")
+             
+        try:
+            logger.info(f"Uploading video {video_path}...")
+            video_file = genai.upload_file(path=video_path)
+            
+            # Wait for processing
+            import time
+            while video_file.state.name == "PROCESSING":
+                time.sleep(2)
+                video_file = genai.get_file(video_file.name)
+                
+            if video_file.state.name == "FAILED":
+                raise Exception("Video processing failed.")
+                
+            logger.info(f"Video ready. Analyzing with prompt: {user_prompt}")
+            
+            parts = [video_file, user_prompt]
+            response = self.model.generate_content(parts)
+            usage_data = self._extract_usage(response)
+            
+            # Cleanup? genai files persist for 48h. Maybe we want to keep it or let it expire.
+            # We will let it expire for now or explicit delete if needed.
+            
+            return {
+                "result": response.text,
+                "usage": usage_data
+            }
+            
+        except Exception as e:
+            logger.error(f"Video Analysis Error: {e}")
+            raise
 ai_service = AIService()
