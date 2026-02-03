@@ -390,12 +390,22 @@ def handle_patrol_schedule_item(schedule_id):
 
 @app.route('/api/patrol/results', methods=['GET'])
 def get_patrol_results():
+    """Return inspection results for the current patrol run only."""
+    current_run_id = patrol_service.current_run_id
+
+    # If no active patrol, return empty list
+    if not current_run_id:
+        return jsonify([])
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT point_name, ai_response, timestamp FROM inspection_results ORDER BY id DESC LIMIT 20')
+    cursor.execute(
+        'SELECT point_name, ai_response, timestamp FROM inspection_results WHERE run_id = ? ORDER BY id ASC',
+        (current_run_id,)
+    )
     rows = cursor.fetchall()
     conn.close()
-    
+
     results = []
     for row in rows:
         results.append({
@@ -403,7 +413,6 @@ def get_patrol_results():
             "result": row[1],
             "timestamp": row[2]
         })
-    results.reverse()
     return jsonify(results)
 
 # --- Stats APIs ---
