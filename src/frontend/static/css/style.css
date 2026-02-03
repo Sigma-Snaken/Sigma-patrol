@@ -1597,3 +1597,136 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 #patrol-history-container .results-grid {
     padding: 12px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BEDS CONFIGURATION PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.beds-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.room-section {
+    border: 1px solid var(--border-subtle);
+    background: var(--panel-light);
+    padding: 16px;
+}
+
+.room-header {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--amber);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.room-beds {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.bed-card {
+    background: var(--panel-mid);
+    border: 1px solid var(--border-subtle);
+    padding: 12px;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.bed-card:hover {
+    border-color: var(--amber-dim);
+    background: var(--panel-hover);
+}
+
+.bed-card.disabled {
+    opacity: 0.5;
+    background: var(--panel-dark);
+}
+
+.bed-card .bed-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.bed-card .bed-name {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--teal);
+}
+
+.bed-card .bed-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bed-card .bed-toggle label {
+    font-size: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.bed-card .bed-field {
+    margin-bottom: 8px;
+}
+
+.bed-card .bed-field label {
+    display: block;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.bed-card .bed-field input {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 11px;
+    background: var(--void);
+    border: 1px solid var(--border-subtle);
+}
+
+.bed-card .bed-field input:focus {
+    border-color: var(--amber-dim);
+    outline: none;
+}
+
+.room-divider {
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--amber-dim) 20%,
+        var(--amber) 50%,
+        var(--amber-dim) 80%,
+        transparent 100%
+    );
+    margin: 16px 0;
+    opacity: 0.5;
+}
+
+#view-beds .header h1 {
+    margin: 0;
+}
+
+#view-beds .glass-panel {
+    margin-bottom: 0;
+}
+
+/* Beds view specific number inputs */
+#view-beds input[type="number"] {
+    width: 100%;
+}

@@ -13,6 +13,7 @@ IMAGES_DIR = os.path.join(REPORT_DIR, "images")
 
 POINTS_FILE = os.path.join(CONFIG_DIR, "points.json")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
+BEDS_FILE = os.path.join(CONFIG_DIR, "beds.json")
 RESULTS_FILE = os.path.join(REPORT_DIR, "results.json")
 DB_FILE = os.path.join(REPORT_DIR, "report.db")
 
@@ -29,7 +30,7 @@ DEFAULT_SETTINGS = {
 **背景資訊/表格結構：**
 以下是本次巡檢的項目清單。請以這個結構為基礎，進行評估與填寫。
 
-| 類別 (Category) | 編號 (No.) | 巡檢項目 (Check Item) | 
+| 類別 (Category) | 編號 (No.) | 巡檢項目 (Check Item) |
 | :--- | :--- | :--- |
 | 用電安全 | 1 | 公共區域電氣設備使用完畢是否依程序關閉—廁所及走廊 |
 | 用電安全 | 2 | 公共區域是否不當使用插座—辨識公共插座是否沒有插線 |
@@ -48,8 +49,54 @@ DEFAULT_SETTINGS = {
 2.  **備註/異常說明 (Notes)：** 詳細說明任何標記為「X」的項目，或需要注意的事項。
 
 **請以一個完整的 Markdown 表格呈現最終的巡檢報告。**""",
-    "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies."
+    "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies.",
+    "mqtt_broker": "localhost",
+    "mqtt_port": 1883,
+    "mqtt_topic": "/data-test/demo/wisleep-eck/org/201906078",
+    "mqtt_enabled": False,
+    "mqtt_shelf_id": "",
+    "patrol_mode": "visual",  # Options: "visual", "physiological"
+
+    # Bio-Sensor Settings
+    "bio_scan_wait_time": 10,        # Measurement interval in seconds
+    "bio_scan_retry_count": 6,       # Number of retries for valid data
+    "bio_scan_initial_wait": 5,      # Initial wait time in seconds
+    "bio_scan_valid_status": 4,      # Status code indicating valid measurement
+
+    # Patrol Timing Settings
+    "schedule_check_interval": 30,   # Schedule checker interval in seconds
+    "inspection_delay": 2,           # Delay before inspection in seconds
+
+    # Robot Retry Settings
+    "robot_max_retries": 3,
+    "robot_retry_base_delay": 2.0,
+    "robot_retry_max_delay": 10.0,
 }
+
+
+def generate_default_beds(room_count=14, room_start=101, bed_numbers=None):
+    """Generate default bed configuration."""
+    if bed_numbers is None:
+        bed_numbers = [1, 2, 3, 5, 6]
+
+    beds = {}
+    for i in range(room_count):
+        room = room_start + i
+        for bed in bed_numbers:
+            bed_key = f"{room}-{bed}"
+            beds[bed_key] = {
+                "room": room,
+                "bed": bed,
+                "location_id": f"B_{bed_key}",
+                "enabled": True
+            }
+
+    return {
+        "room_count": room_count,
+        "room_start": room_start,
+        "bed_numbers": bed_numbers,
+        "beds": beds
+    }
 
 def ensure_dirs():
     os.makedirs(CONFIG_DIR, exist_ok=True)

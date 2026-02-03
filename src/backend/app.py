@@ -10,6 +10,7 @@ from PIL import Image
 
 # New Modules
 from config import *
+from config import BEDS_FILE, generate_default_beds
 from utils import load_json, save_json
 from database import init_db, get_db_connection, save_generated_report
 from robot_service import robot_service
@@ -328,6 +329,30 @@ def get_points_from_robot():
     except Exception as e:
         logging.error(f"Error fetching locations from robot: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beds', methods=['GET', 'POST'])
+def handle_beds():
+    """Beds configuration endpoint for physiological patrol mode."""
+    if request.method == 'POST':
+        beds_config = request.json
+        try:
+            save_json(BEDS_FILE, beds_config)
+            return jsonify({"status": "saved"})
+        except Exception as e:
+            logging.error(f"Failed to save beds config: {e}")
+            return jsonify({"error": f"Failed to save beds config: {str(e)}"}), 500
+    else:
+        # GET: Load beds config or generate default
+        beds_config = load_json(BEDS_FILE, None)
+        if beds_config is None:
+            # Generate default configuration
+            beds_config = generate_default_beds()
+            try:
+                save_json(BEDS_FILE, beds_config)
+            except Exception as e:
+                logging.warning(f"Could not save default beds config: {e}")
+        return jsonify(beds_config)
+
 
 @app.route('/api/patrol/status', methods=['GET'])
 def get_patrol_status_route():

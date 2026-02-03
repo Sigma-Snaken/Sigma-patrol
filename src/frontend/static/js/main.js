@@ -104,12 +104,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabName === 'control' && btns[1]) btns[1].classList.add('active');
         if (tabName === 'history' && btns[2]) btns[2].classList.add('active');
         if (tabName === 'stats' && btns[3]) btns[3].classList.add('active');
-        if (tabName === 'settings' && btns[4]) btns[4].classList.add('active');
+        if (tabName === 'beds' && btns[4]) btns[4].classList.add('active');
+        if (tabName === 'settings' && btns[5]) btns[5].classList.add('active');
 
         // Load specific data
         if (tabName === 'history') loadHistory();
         if (tabName === 'stats') loadStats();
         if (tabName === 'settings') loadSettings();
+        if (tabName === 'beds') loadBedsConfig();
 
         // Reparent Map Container
         const mapContainer = document.getElementById('map-container');
@@ -133,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- COLLAPSIBLE PANELS ---
 
     // Toggle Analysis History (merged into Latest AI Analysis panel)
-    window.toggleAnalysisHistory = function() {
+    window.toggleAnalysisHistory = function () {
         const container = document.getElementById('patrol-history-container');
         const icon = document.getElementById('history-toggle-icon');
         if (container) {
@@ -859,6 +861,55 @@ document.addEventListener('DOMContentLoaded', () => {
         // Handle robot_ip if element exists (will be added to HTML next)
         const ipInput = document.getElementById('setting-robot-ip');
         if (ipInput) ipInput.value = data.robot_ip || '192.168.50.133:26400';
+
+        // MQTT Settings
+        const mqttCheckbox = document.getElementById('setting-mqtt-enabled');
+        if (mqttCheckbox) mqttCheckbox.checked = data.mqtt_enabled === true;
+
+        const mqttBroker = document.getElementById('setting-mqtt-broker');
+        if (mqttBroker) mqttBroker.value = data.mqtt_broker || '';
+
+        const mqttPort = document.getElementById('setting-mqtt-port');
+        if (mqttPort) mqttPort.value = data.mqtt_port || '';
+
+        const mqttTopic = document.getElementById('setting-mqtt-topic');
+        if (mqttTopic) mqttTopic.value = data.mqtt_topic || '';
+
+        const mqttShelfId = document.getElementById('setting-mqtt-shelf-id');
+        if (mqttShelfId) mqttShelfId.value = data.mqtt_shelf_id || '';
+
+        const patrolMode = document.getElementById('setting-patrol-mode');
+        if (patrolMode) patrolMode.value = data.patrol_mode || 'visual';
+
+        // Bio-Sensor Timing Settings
+        const bioScanWaitTime = document.getElementById('setting-bio-scan-wait-time');
+        if (bioScanWaitTime) bioScanWaitTime.value = data.bio_scan_wait_time || 10;
+
+        const bioScanRetryCount = document.getElementById('setting-bio-scan-retry-count');
+        if (bioScanRetryCount) bioScanRetryCount.value = data.bio_scan_retry_count || 6;
+
+        const bioScanInitialWait = document.getElementById('setting-bio-scan-initial-wait');
+        if (bioScanInitialWait) bioScanInitialWait.value = data.bio_scan_initial_wait || 5;
+
+        const bioScanValidStatus = document.getElementById('setting-bio-scan-valid-status');
+        if (bioScanValidStatus) bioScanValidStatus.value = data.bio_scan_valid_status || 4;
+
+        // Patrol Timing Settings
+        const scheduleCheckInterval = document.getElementById('setting-schedule-check-interval');
+        if (scheduleCheckInterval) scheduleCheckInterval.value = data.schedule_check_interval || 30;
+
+        const inspectionDelay = document.getElementById('setting-inspection-delay');
+        if (inspectionDelay) inspectionDelay.value = data.inspection_delay || 2;
+
+        // Robot Retry Settings
+        const robotMaxRetries = document.getElementById('setting-robot-max-retries');
+        if (robotMaxRetries) robotMaxRetries.value = data.robot_max_retries || 3;
+
+        const robotRetryBaseDelay = document.getElementById('setting-robot-retry-base-delay');
+        if (robotRetryBaseDelay) robotRetryBaseDelay.value = data.robot_retry_base_delay || 2.0;
+
+        const robotRetryMaxDelay = document.getElementById('setting-robot-retry-max-delay');
+        if (robotRetryMaxDelay) robotRetryMaxDelay.value = data.robot_retry_max_delay || 10.0;
     }
 
     async function saveSettings() {
@@ -877,7 +928,25 @@ document.addEventListener('DOMContentLoaded', () => {
             enable_telegram: document.getElementById('setting-enable-telegram').checked,
             telegram_bot_token: document.getElementById('setting-telegram-bot-token').value,
             telegram_user_id: document.getElementById('setting-telegram-user-id').value,
-            robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
+            robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400',
+            mqtt_enabled: document.getElementById('setting-mqtt-enabled').checked,
+            mqtt_broker: document.getElementById('setting-mqtt-broker').value,
+            mqtt_port: parseInt(document.getElementById('setting-mqtt-port').value) || 1883,
+            mqtt_topic: document.getElementById('setting-mqtt-topic').value,
+            mqtt_shelf_id: document.getElementById('setting-mqtt-shelf-id').value,
+            patrol_mode: document.getElementById('setting-patrol-mode').value,
+            // Bio-Sensor Timing Settings
+            bio_scan_wait_time: parseInt(document.getElementById('setting-bio-scan-wait-time')?.value) || 10,
+            bio_scan_retry_count: parseInt(document.getElementById('setting-bio-scan-retry-count')?.value) || 6,
+            bio_scan_initial_wait: parseInt(document.getElementById('setting-bio-scan-initial-wait')?.value) || 5,
+            bio_scan_valid_status: parseInt(document.getElementById('setting-bio-scan-valid-status')?.value) || 4,
+            // Patrol Timing Settings
+            schedule_check_interval: parseInt(document.getElementById('setting-schedule-check-interval')?.value) || 30,
+            inspection_delay: parseInt(document.getElementById('setting-inspection-delay')?.value) || 2,
+            // Robot Retry Settings
+            robot_max_retries: parseInt(document.getElementById('setting-robot-max-retries')?.value) || 3,
+            robot_retry_base_delay: parseFloat(document.getElementById('setting-robot-retry-base-delay')?.value) || 2.0,
+            robot_retry_max_delay: parseFloat(document.getElementById('setting-robot-retry-max-delay')?.value) || 10.0
         };
         try {
             const res = await fetch('/api/settings', {
@@ -1877,5 +1946,205 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Default
     window.switchTab('control');
+
+    // === BEDS CONFIGURATION ===
+
+    let currentBedsConfig = null;
+
+    async function loadBedsConfig() {
+        try {
+            const res = await fetch('/api/beds');
+            const data = await res.json();
+            currentBedsConfig = data;
+
+            // Update form fields
+            document.getElementById('beds-room-count').value = data.room_count || 14;
+            document.getElementById('beds-room-start').value = data.room_start || 101;
+            document.getElementById('beds-bed-numbers').value = (data.bed_numbers || [1, 2, 3, 5, 6]).join(', ');
+
+            renderBedsGrid();
+        } catch (e) {
+            console.error("Failed to load beds config:", e);
+            document.getElementById('beds-grid').innerHTML = `
+                <div style="color: var(--coral); text-align: center; padding: 40px;">
+                    Error loading beds configuration: ${e.message}
+                </div>
+            `;
+        }
+    }
+
+    function renderBedsGrid() {
+        const container = document.getElementById('beds-grid');
+        if (!currentBedsConfig || !currentBedsConfig.beds) {
+            container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 40px;">No beds configured</div>';
+            return;
+        }
+
+        const beds = currentBedsConfig.beds;
+        const roomCount = currentBedsConfig.room_count || 14;
+        const roomStart = currentBedsConfig.room_start || 101;
+        const bedNumbers = currentBedsConfig.bed_numbers || [1, 2, 3, 5, 6];
+
+        // Group beds by room
+        const roomsMap = {};
+        for (const [bedKey, bedInfo] of Object.entries(beds)) {
+            const room = bedInfo.room;
+            if (!roomsMap[room]) {
+                roomsMap[room] = [];
+            }
+            roomsMap[room].push({ key: bedKey, ...bedInfo });
+        }
+
+        // Sort rooms
+        const sortedRooms = Object.keys(roomsMap).map(Number).sort((a, b) => a - b);
+
+        let html = '';
+        sortedRooms.forEach(room => {
+            const roomBeds = roomsMap[room].sort((a, b) => a.bed - b.bed);
+
+            html += `
+                <div class="room-section">
+                    <div class="room-header">
+                        <span>Room ${room}</span>
+                        <span style="font-size: 11px; color: var(--text-muted);">${roomBeds.length} beds</span>
+                    </div>
+                    <div class="room-beds">
+            `;
+
+            roomBeds.forEach(bed => {
+                const disabledClass = bed.enabled === false ? 'disabled' : '';
+                html += `
+                    <div class="bed-card ${disabledClass}" data-bed-key="${bed.key}">
+                        <div class="bed-header">
+                            <span class="bed-name">Bed ${bed.bed}</span>
+                            <div class="bed-toggle">
+                                <label for="bed-enabled-${bed.key}">Enabled</label>
+                                <input type="checkbox" id="bed-enabled-${bed.key}"
+                                    ${bed.enabled !== false ? 'checked' : ''}
+                                    onchange="toggleBed('${bed.key}', this.checked)">
+                            </div>
+                        </div>
+                        <div class="bed-field">
+                            <label>Location ID</label>
+                            <input type="text" value="${bed.location_id || ''}"
+                                onchange="updateBedField('${bed.key}', 'location_id', this.value)"
+                                placeholder="e.g., B_${bed.key}">
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html || '<div style="color: var(--text-muted); text-align: center; padding: 40px;">No beds configured</div>';
+    }
+
+    window.toggleBed = function(bedKey, enabled) {
+        if (!currentBedsConfig || !currentBedsConfig.beds[bedKey]) return;
+        currentBedsConfig.beds[bedKey].enabled = enabled;
+
+        // Update visual state
+        const card = document.querySelector(`.bed-card[data-bed-key="${bedKey}"]`);
+        if (card) {
+            if (enabled) {
+                card.classList.remove('disabled');
+            } else {
+                card.classList.add('disabled');
+            }
+        }
+    };
+
+    window.updateBedField = function(bedKey, field, value) {
+        if (!currentBedsConfig || !currentBedsConfig.beds[bedKey]) return;
+        currentBedsConfig.beds[bedKey][field] = value;
+    };
+
+    async function regenerateBeds() {
+        const roomCount = parseInt(document.getElementById('beds-room-count').value) || 14;
+        const roomStart = parseInt(document.getElementById('beds-room-start').value) || 101;
+        const bedNumbersStr = document.getElementById('beds-bed-numbers').value || '1, 2, 3, 5, 6';
+
+        // Parse bed numbers
+        const bedNumbers = bedNumbersStr.split(',')
+            .map(s => parseInt(s.trim()))
+            .filter(n => !isNaN(n));
+
+        if (bedNumbers.length === 0) {
+            alert('Please enter valid bed numbers (comma-separated)');
+            return;
+        }
+
+        // Generate new beds config
+        const beds = {};
+        for (let i = 0; i < roomCount; i++) {
+            const room = roomStart + i;
+            for (const bed of bedNumbers) {
+                const bedKey = `${room}-${bed}`;
+                beds[bedKey] = {
+                    room: room,
+                    bed: bed,
+                    location_id: `B_${bedKey}`,
+                    enabled: true
+                };
+            }
+        }
+
+        currentBedsConfig = {
+            room_count: roomCount,
+            room_start: roomStart,
+            bed_numbers: bedNumbers,
+            beds: beds
+        };
+
+        renderBedsGrid();
+    }
+
+    async function saveBedsConfig() {
+        if (!currentBedsConfig) {
+            alert('No beds configuration to save');
+            return;
+        }
+
+        // Update room settings from form
+        currentBedsConfig.room_count = parseInt(document.getElementById('beds-room-count').value) || 14;
+        currentBedsConfig.room_start = parseInt(document.getElementById('beds-room-start').value) || 101;
+        const bedNumbersStr = document.getElementById('beds-bed-numbers').value || '1, 2, 3, 5, 6';
+        currentBedsConfig.bed_numbers = bedNumbersStr.split(',')
+            .map(s => parseInt(s.trim()))
+            .filter(n => !isNaN(n));
+
+        try {
+            const res = await fetch('/api/beds', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(currentBedsConfig)
+            });
+
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                alert('Failed to save beds configuration: ' + (data.error || 'Unknown error'));
+                return;
+            }
+
+            alert('Beds configuration saved successfully!');
+        } catch (e) {
+            alert('Failed to save beds configuration: ' + e.message);
+        }
+    }
+
+    // Beds button event listeners
+    const btnRegenerateBeds = document.getElementById('btn-regenerate-beds');
+    if (btnRegenerateBeds) {
+        btnRegenerateBeds.addEventListener('click', regenerateBeds);
+    }
+
+    const btnSaveBeds = document.getElementById('btn-save-beds');
+    if (btnSaveBeds) {
+        btnSaveBeds.addEventListener('click', saveBedsConfig);
+    }
 
 });

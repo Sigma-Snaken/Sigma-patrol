@@ -10,8 +10,9 @@ import uuid
 import io
 from datetime import datetime
 from PIL import Image
+import asyncio
 
-from config import SETTINGS_FILE, DEFAULT_SETTINGS, IMAGES_DIR, POINTS_FILE, DATA_DIR
+from config import SETTINGS_FILE, DEFAULT_SETTINGS, IMAGES_DIR, POINTS_FILE, DATA_DIR, BEDS_FILE
 import requests
 from utils import load_json, save_json, get_current_time_str, get_filename_timestamp
 from database import get_db_connection, db_context, update_run_tokens
@@ -20,6 +21,7 @@ from ai_service import ai_service, parse_ai_response
 from pdf_service import generate_patrol_report
 from logger import get_logger
 from video_recorder import VideoRecorder
+from mqtt_service import BioSensorMQTTClient
 
 logger = get_logger("patrol_service", "patrol_service.log")
 
@@ -49,6 +51,10 @@ class PatrolService:
         self.scheduled_patrols = []
         self._load_schedule()
         threading.Thread(target=self._schedule_checker, daemon=True).start()
+
+        # MQTT Client
+        self.mqtt_client = None
+
 
     # === Schedule Management ===
 
@@ -150,7 +156,8 @@ class PatrolService:
             except Exception as e:
                 logger.error(f"Schedule checker error: {e}")
 
-            time.sleep(30)
+            check_interval = settings.get("schedule_check_interval", 30)
+            time.sleep(check_interval)
 
     # === Status Management ===
 
@@ -278,6 +285,26 @@ class PatrolService:
         except Exception as e:
             logger.error(f"DB Error saving inspection for {point_name}: {e}")
 
+    # === Internal Helpers ===
+    
+    def _ensure_mqtt_client(self, settings):
+        """Initialize or update MQTT client based on settings."""
+        if settings.get("mqtt_enabled", False):
+            broker = settings.get("mqtt_broker", "localhost")
+            port = settings.get("mqtt_port", 1883)
+            topic = settings.get("mqtt_topic", "")
+            
+            # If client exists but config changed, restart it (simplified: just keep existing for now or restart)
+            # For robustness, we create if None.
+            if self.mqtt_client is None:
+                logger.info(f"Initializing MQTT Client: {broker}:{port}")
+                self.mqtt_client = BioSensorMQTTClient(broker, port, topic)
+                self.mqtt_client.start()
+        else:
+            if self.mqtt_client:
+                self.mqtt_client.stop()
+                self.mqtt_client = None
+
     # === Main Patrol Logic ===
 
     def _patrol_logic(self):
@@ -339,6 +366,13 @@ class PatrolService:
 
         inspections_data = []
         turbo_mode = settings.get('turbo_mode', False)
+        patrol_mode = settings.get('patrol_mode', 'visual')
+
+        # Ensure MQTT if needed
+        if patrol_mode == 'physiological':
+             self._ensure_mqtt_client(settings)
+             if not self.mqtt_client:
+                 logger.warning("Physiological mode selected but MQTT not enabled/initialized.")
 
         # Main patrol loop
         for i, point in enumerate(to_patrol):
@@ -352,7 +386,7 @@ class PatrolService:
             logger.info(f"Moving to {i+1}/{len(to_patrol)}: {point_name}")
 
             # Move to point
-            move_status = self._move_to_point(point)
+            move_status = self._move_to_point(point, settings)
 
             if move_status != "Success":
                 self._save_inspection(
@@ -370,12 +404,21 @@ class PatrolService:
 
             # Inspect point
             self._set_status(f"Inspecting {point_name}...")
-            time.sleep(2)
+            inspection_delay = settings.get('inspection_delay', 2)
+            time.sleep(inspection_delay)
 
-            self._inspect_point(
-                point, point_name, run_images_dir, settings,
-                turbo_mode, inspections_data
-            )
+            if patrol_mode == 'physiological':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._inspect_point_physiological(
+                    point, point_name, inspections_data, settings
+                ))
+                loop.close()
+            else:
+                self._inspect_point(
+                    point, point_name, run_images_dir, settings,
+                    turbo_mode, inspections_data
+                )
 
         # Finalize patrol
         with self.patrol_lock:
@@ -438,20 +481,49 @@ class PatrolService:
         with self.state_lock:
             self.current_run_id = None
 
-    def _move_to_point(self, point):
+    def _move_to_point(self, point, settings):
         """Move robot to patrol point. Returns status string."""
         if not robot_service.get_client():
             return "Error: Disconnected"
 
+        patrol_mode = settings.get("patrol_mode", "visual")
+        shelf_id = settings.get("mqtt_shelf_id", "")
+
         try:
-            result = robot_service.move_to(
-                float(point['x']), float(point['y']),
-                float(point.get('theta', 0.0)), wait=True
-            )
-            if result and getattr(result, 'success', False):
+            if patrol_mode == "physiological" and shelf_id:
+                # Use move_shelf for physiological mode if shelf_id is set
+                # Get location_id from beds.json based on bed_key
+                beds_config = load_json(BEDS_FILE, {})
+                beds = beds_config.get('beds', {})
+
+                # Get bed_key from point config (prefer bed_key, fallback to name)
+                bed_key = point.get('bed_key', point.get('name', ''))
+
+                # Look up location_id from beds config
+                bed_info = beds.get(bed_key, {})
+                location_id = bed_info.get('location_id')
+
+                # Fallback to default format if not found
+                if not location_id:
+                    location_id = f"B_{bed_key}" if bed_key else ''
+
+                if not location_id:
+                    return "Error: No Location ID"
+
+                logger.info(f"Moving Shelf {shelf_id} to {location_id} (bed: {bed_key})...")
+                robot_service.move_shelf(shelf_id, location_id, wait=True)
+                # Note: move_shelf return value checking might differ, we assume success or exception
                 return "Success"
-            error_code = getattr(result, 'error_code', 'Unknown') if result else 'No Result'
-            return f"Error: {error_code}"
+            else:
+                # Standard move
+                result = robot_service.move_to(
+                    float(point['x']), float(point['y']),
+                    float(point.get('theta', 0.0)), wait=True
+                )
+                if result and getattr(result, 'success', False):
+                    return "Success"
+                error_code = getattr(result, 'error_code', 'Unknown') if result else 'No Result'
+                return f"Error: {error_code}"
         except Exception as e:
             return f"Error: {e}"
 
@@ -595,6 +667,45 @@ class PatrolService:
 
         except Exception as e:
             logger.error(f"Telegram Notification Failed: {e}")
+
+
+    async def _inspect_point_physiological(self, point, point_name, inspections_data, settings=None):
+        """Run physiological inspection using MQTT."""
+        if not self.mqtt_client:
+            logger.error("MQTT Client not available for physiological inspection")
+            inspections_data.append({"point": point_name, "result": "MQTT Error"})
+            return
+
+        if settings is None:
+            settings = {}
+
+        try:
+            # We use the current run_id as the task context
+            task_id = f"{self.current_run_id}"
+
+            # Get bed_key from point config or use point_name
+            target_bed = point.get('bed_key', point.get('bed_id', point_name))
+
+            logger.info(f"Waiting for physiological data for {target_bed}...")
+            self._set_status(f"Scanning {target_bed}...")
+
+            result = await self.mqtt_client.get_valid_scan_data(task_id, target_bed, settings)
+            
+            d = result.get('data')
+            if d:
+                status_text = f"BPM: {d.get('bpm')}, RPM: {d.get('rpm')}"
+                inspections_data.append({"point": point_name, "result": status_text})
+                
+                # Save to existing inspection_results for compatibility?
+                # The MQTT client saves to its own DB. 
+                # We might want to unify this, but for now we follow the plan of minimal disruption.
+                # However, for the report generation to work, we added the result to inspections_data.
+            else:
+                inspections_data.append({"point": point_name, "result": "No Data / Timeout"})
+
+        except Exception as e:
+            logger.error(f"Physiological Inspection Error: {e}")
+            inspections_data.append({"point": point_name, "result": f"Error: {e}"})
 
 
 patrol_service = PatrolService()

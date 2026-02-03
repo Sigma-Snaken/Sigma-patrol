@@ -23,6 +23,7 @@
                 <button class="tab-btn active" onclick="switchTab('control')">Control</button>
                 <button class="tab-btn" onclick="switchTab('history')">History</button>
                 <button class="tab-btn" onclick="switchTab('stats')">Stats</button>
+                <button class="tab-btn" onclick="switchTab('beds')">Beds</button>
                 <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
             </div>
 
@@ -186,7 +187,8 @@
                                 <h4
                                     style="margin: 0; color: var(--teal); font-family: var(--font-display); font-size: 10px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;">
                                     Latest AI Analysis</h4>
-                                <button id="btn-toggle-history" onclick="toggleAnalysisHistory()" class="btn-toggle-history">
+                                <button id="btn-toggle-history" onclick="toggleAnalysisHistory()"
+                                    class="btn-toggle-history">
                                     <span id="history-toggle-icon">▼</span> History
                                 </button>
                             </div>
@@ -194,7 +196,8 @@
                                 style="background: var(--panel-mid); padding: 14px; min-height: 80px;">
                                 Waiting for data...
                             </div>
-                            <div id="patrol-history-container" style="display: none; max-height: 300px; overflow-y: auto;">
+                            <div id="patrol-history-container"
+                                style="display: none; max-height: 300px; overflow-y: auto;">
                                 <div id="results-container" class="results-grid"></div>
                             </div>
                         </div>
@@ -392,6 +395,49 @@
             </div>
 
             <!-- ═══════════════════════════════════════════════════════════════
+                 BEDS VIEW
+                 ═══════════════════════════════════════════════════════════════ -->
+            <div id="view-beds" class="tab-content" style="display: none; padding: 24px; overflow-y: auto;">
+                <div class="header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h1>Beds Configuration</h1>
+                    <div style="display: flex; gap: 12px;">
+                        <button id="btn-regenerate-beds" class="btn-secondary">Regenerate</button>
+                        <button id="btn-save-beds" class="btn-primary">Save Configuration</button>
+                    </div>
+                </div>
+
+                <!-- Room Settings -->
+                <div class="glass-panel" style="margin-bottom: 20px;">
+                    <h3 class="settings-section-title">Room Settings</h3>
+                    <div style="display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end;">
+                        <div class="form-group" style="flex: 0 0 150px;">
+                            <label>Room Count</label>
+                            <input type="number" id="beds-room-count" value="14" min="1" max="100">
+                        </div>
+                        <div class="form-group" style="flex: 0 0 150px;">
+                            <label>Starting Room Number</label>
+                            <input type="number" id="beds-room-start" value="101" min="1">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label>Bed Numbers (comma-separated)</label>
+                            <input type="text" id="beds-bed-numbers" value="1, 2, 3, 5, 6" placeholder="e.g., 1, 2, 3, 5, 6">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Beds Grid -->
+                <div class="glass-panel">
+                    <h3 class="settings-section-title">Beds Grid</h3>
+                    <div id="beds-grid" class="beds-grid">
+                        <!-- Dynamically populated by JavaScript -->
+                        <div style="color: var(--text-muted); text-align: center; padding: 40px;">
+                            Loading beds configuration...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════════════════════════════
                  SETTINGS VIEW
                  ═══════════════════════════════════════════════════════════════ -->
             <div id="view-settings" class="tab-content" style="display: none;">
@@ -429,27 +475,118 @@
 
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-turbo-mode" style="width: auto;">
-                            <label for="setting-turbo-mode" style="margin: 0; cursor: pointer;">Enable Turbo Mode (Async Analysis)</label>
+                            <label for="setting-turbo-mode" style="margin: 0; cursor: pointer;">Enable Turbo Mode (Async
+                                Analysis)</label>
                         </div>
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-enable-video" style="width: auto;">
-                            <label for="setting-enable-video" style="margin: 0; cursor: pointer;">Enable Video Recording</label>
+                            <label for="setting-enable-video" style="margin: 0; cursor: pointer;">Enable Video
+                                Recording</label>
                         </div>
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-enable-idle-stream" style="width: auto;">
-                            <label for="setting-enable-idle-stream" style="margin: 0; cursor: pointer;">Continuous Camera Stream</label>
+                            <label for="setting-enable-idle-stream" style="margin: 0; cursor: pointer;">Continuous
+                                Camera Stream</label>
                         </div>
 
-                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);"></div>
+                        <div class="form-group">
+                            <label>Patrol Mode</label>
+                            <select id="setting-patrol-mode">
+                                <option value="visual">Visual Inspection</option>
+                                <option value="physiological">Physiological (Bio-Sensor)</option>
+                            </select>
+                        </div>
+
+                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);">
+                        </div>
+
+                        <h3 class="settings-section-title">MQTT Configuration</h3>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="setting-mqtt-enabled" style="width: auto;">
+                            <label for="setting-mqtt-enabled" style="margin: 0; cursor: pointer;">Enable MQTT
+                                Client</label>
+                        </div>
+                        <div class="form-group">
+                            <label>MQTT Broker IP</label>
+                            <input type="text" id="setting-mqtt-broker" placeholder="e.g. localhost">
+                        </div>
+                        <div class="form-group">
+                            <label>MQTT Port</label>
+                            <input type="number" id="setting-mqtt-port" placeholder="e.g. 1883">
+                        </div>
+                        <div class="form-group">
+                            <label>MQTT Topic</label>
+                            <input type="text" id="setting-mqtt-topic" placeholder="e.g. /sensor/data">
+                        </div>
+                        <div class="form-group">
+                            <label>Shelf ID (Bio-Sensor)</label>
+                            <input type="text" id="setting-mqtt-shelf-id" placeholder="Optional Shelf ID">
+                        </div>
+
+                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);">
+                        </div>
+
+                        <h3 class="settings-section-title">Bio-Sensor Timing</h3>
+                        <div class="form-group">
+                            <label>Scan Wait Time (seconds)</label>
+                            <input type="number" id="setting-bio-scan-wait-time" placeholder="10" min="1" max="60">
+                        </div>
+                        <div class="form-group">
+                            <label>Retry Count</label>
+                            <input type="number" id="setting-bio-scan-retry-count" placeholder="6" min="1" max="30">
+                        </div>
+                        <div class="form-group">
+                            <label>Initial Wait (seconds)</label>
+                            <input type="number" id="setting-bio-scan-initial-wait" placeholder="5" min="1" max="60">
+                        </div>
+                        <div class="form-group">
+                            <label>Valid Status Code</label>
+                            <input type="number" id="setting-bio-scan-valid-status" placeholder="4" min="0" max="10">
+                        </div>
+
+                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);">
+                        </div>
+
+                        <h3 class="settings-section-title">Patrol Timing</h3>
+                        <div class="form-group">
+                            <label>Schedule Check Interval (seconds)</label>
+                            <input type="number" id="setting-schedule-check-interval" placeholder="30" min="10" max="300">
+                        </div>
+                        <div class="form-group">
+                            <label>Inspection Delay (seconds)</label>
+                            <input type="number" id="setting-inspection-delay" placeholder="2" min="0" max="30">
+                        </div>
+
+                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);">
+                        </div>
+
+                        <h3 class="settings-section-title">Robot Retry Settings</h3>
+                        <div class="form-group">
+                            <label>Max Retries</label>
+                            <input type="number" id="setting-robot-max-retries" placeholder="3" min="1" max="10">
+                        </div>
+                        <div class="form-group">
+                            <label>Retry Base Delay (seconds)</label>
+                            <input type="number" id="setting-robot-retry-base-delay" placeholder="2.0" min="0.5" max="30" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Retry Max Delay (seconds)</label>
+                            <input type="number" id="setting-robot-retry-max-delay" placeholder="10.0" min="1" max="60" step="0.5">
+                        </div>
+
+                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);">
+                        </div>
 
                         <h3 class="settings-section-title">Telegram Notifications</h3>
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-enable-telegram" style="width: auto;">
-                            <label for="setting-enable-telegram" style="margin: 0; cursor: pointer;">Enable Telegram Notification</label>
+                            <label for="setting-enable-telegram" style="margin: 0; cursor: pointer;">Enable Telegram
+                                Notification</label>
                         </div>
                         <div class="form-group">
                             <label>Telegram Bot Token</label>
-                            <input type="password" id="setting-telegram-bot-token" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
+                            <input type="password" id="setting-telegram-bot-token"
+                                placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
                         </div>
                         <div class="form-group">
                             <label>Telegram User ID</label>
@@ -463,19 +600,23 @@
 
                         <div class="form-group">
                             <label>System Role / Prompt</label>
-                            <textarea id="setting-role" rows="5" placeholder="Define the AI's behavior and context..."></textarea>
+                            <textarea id="setting-role" rows="5"
+                                placeholder="Define the AI's behavior and context..."></textarea>
                         </div>
                         <div class="form-group">
                             <label>Video Analysis Prompt</label>
-                            <textarea id="setting-video-prompt" rows="4" placeholder="Instructions for video analysis..."></textarea>
+                            <textarea id="setting-video-prompt" rows="4"
+                                placeholder="Instructions for video analysis..."></textarea>
                         </div>
                         <div class="form-group">
                             <label>Report Prompt (Single Run)</label>
-                            <textarea id="setting-report-prompt" rows="4" placeholder="Custom instructions for single patrol report generation..."></textarea>
+                            <textarea id="setting-report-prompt" rows="4"
+                                placeholder="Custom instructions for single patrol report generation..."></textarea>
                         </div>
                         <div class="form-group">
                             <label>Multiday Report Prompt (Date Range)</label>
-                            <textarea id="setting-multiday-report-prompt" rows="4" placeholder="Custom instructions for aggregated report generation..."></textarea>
+                            <textarea id="setting-multiday-report-prompt" rows="4"
+                                placeholder="Custom instructions for aggregated report generation..."></textarea>
                         </div>
                     </div>
                 </div>
