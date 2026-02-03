@@ -146,6 +146,13 @@ class RobotService:
         if client:
             client.cancel_command()
 
+    def move_shelf(self, shelf_id, location_id, wait=True):
+        with self.client_lock:
+            client = self.client
+        if client:
+            return client.move_shelf(shelf_id, location_id, wait_for_completion=wait)
+        return None
+
     def get_front_camera_image(self):
         with self.client_lock:
             client = self.client

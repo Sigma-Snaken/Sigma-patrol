@@ -6,3 +6,4 @@ google-genai
 reportlab
 opencv-python-headless
 requests
+paho-mqtt
