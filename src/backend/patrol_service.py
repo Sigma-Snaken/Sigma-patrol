@@ -377,11 +377,6 @@ class PatrolService:
                 turbo_mode, inspections_data
             )
 
-        # Wait for async inspections
-        if turbo_mode:
-            self._set_status("Processing Images...")
-            self.inspection_queue.join()
-
         # Finalize patrol
         with self.patrol_lock:
             was_patrolling = self.is_patrolling
@@ -396,11 +391,18 @@ class PatrolService:
                 video_path = video_filename
 
         if was_patrolling:
+            # In turbo mode, start returning home immediately while images are still processing
             self._set_status("Returning Home...")
             try:
                 robot_service.return_home()
             except Exception as e:
                 logger.error(f"Return home failed: {e}")
+
+            # Wait for async inspections to complete (robot is moving home in parallel)
+            if turbo_mode:
+                self._set_status("Processing Images...")
+                self.inspection_queue.join()
+
             time.sleep(2)
 
             if recorder:
