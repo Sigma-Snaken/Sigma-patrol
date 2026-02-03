@@ -5,15 +5,15 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - sigma-patrol-data:/app/data
-      - sigma-patrol-logs:/app/logs
+      - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - DATA_DIR=/app/data
       - LOG_DIR=/app/logs
       - TZ=Asia/Taipei
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/state"]
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/api/state" ]
       interval: 30s
       timeout: 10s
       retries: 3
