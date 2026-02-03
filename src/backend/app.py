@@ -27,7 +27,6 @@ app = Flask(__name__,
 ensure_dirs()
 
 # Logging
-# Logging
 # Use TimezoneFormatter for root logger or app logger
 from logger import TimezoneFormatter
 
@@ -38,16 +37,20 @@ root_logger.setLevel(logging.INFO)
 
 if not root_logger.handlers:
     formatter = TimezoneFormatter('%(asctime)s %(levelname)s: %(message)s')
-    
+
     # File handler for app.log
     file_handler = logging.FileHandler(os.path.join(LOG_DIR, "app.log"))
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
-    
+
     # Console handler
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     root_logger.addHandler(stream_handler)
+
+# Suppress Flask/Werkzeug request logs to focus on application logs
+# (robot actions, AI analysis, report generation)
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 @app.route('/')
 def index():

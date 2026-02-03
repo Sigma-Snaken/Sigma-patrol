@@ -71,7 +71,7 @@ Sigma-patrol/
 │       ├── templates/
 │       │   └── index.html      # Single-page app
 │       └── static/
-│           ├── css/style.css   # Industrial HUD theme
+│           ├── css/style.css   # Light mode cream/beige theme
 │           └── js/main.js      # UI logic
 │
 ├── data/                       # Runtime data (Docker volume)
