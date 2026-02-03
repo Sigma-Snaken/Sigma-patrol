@@ -25,10 +25,10 @@ class VideoRecorder:
             return
         
         try:
-            # MJPG/avi is safest without ffmpeg binary. 
-            # If mp4v works (as tested), we can use mp4.
+            # Use H.264 (avc1) for best compatibility with browsers and IDEs.
+            # Requires ffmpeg to be installed in the container.
             if self.output_path.endswith('.mp4'):
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                fourcc = cv2.VideoWriter_fourcc(*'avc1')
             else:
                 fourcc = cv2.VideoWriter_fourcc(*'MJPG')
                 

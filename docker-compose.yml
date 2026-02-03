@@ -12,4 +12,5 @@ services:
       - DATA_DIR=/app/data
       - LOG_DIR=/app/logs
       - TZ=Asia/Taipei
+    user: "1000:1000"
     restart: unless-stopped
