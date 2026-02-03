@@ -1,9 +1,12 @@
 """
 AI Service - Google Gemini Vision integration for inspection analysis.
+Uses the new google-genai SDK (replacing deprecated google-generativeai).
 """
 
 import json
-import google.generativeai as genai
+import time
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 
 from config import SETTINGS_FILE, DEFAULT_SETTINGS
@@ -82,33 +85,32 @@ class AIService:
     """Gemini AI service for visual inspection and report generation."""
 
     def __init__(self):
-        self.model = None
+        self.client = None
         self.api_key = None
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = "gemini-2.0-flash"
         self._configure()
 
     def _configure(self):
         """Load settings and configure Gemini client."""
         settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
         new_api_key = settings.get("gemini_api_key")
-        new_model_name = settings.get("gemini_model", "gemini-2.5-flash")
+        new_model_name = settings.get("gemini_model", "gemini-2.0-flash")
 
-        if new_api_key != self.api_key or new_model_name != self.model_name or self.model is None:
+        if new_api_key != self.api_key or new_model_name != self.model_name or self.client is None:
             logger.info(f"Configuring AI Service with model: {new_model_name}")
             self.api_key = new_api_key
             self.model_name = new_model_name
 
             if self.api_key:
                 try:
-                    genai.configure(api_key=self.api_key)
-                    self.model = genai.GenerativeModel(self.model_name)
+                    self.client = genai.Client(api_key=self.api_key)
                     logger.info("AI Service configured successfully.")
                 except Exception as e:
                     logger.error(f"AI Service Configuration Error: {e}")
-                    self.model = None
+                    self.client = None
             else:
                 logger.warning("AI Service configured without API Key.")
-                self.model = None
+                self.client = None
 
     def get_model_name(self):
         """Get current model name."""
@@ -118,7 +120,7 @@ class AIService:
     def is_configured(self):
         """Check if AI service is ready."""
         self._configure()
-        return self.model is not None
+        return self.client is not None
 
     def _extract_usage(self, response):
         """Extract token usage from response."""
@@ -147,28 +149,35 @@ class AIService:
         """
         self._configure()
 
-        if not self.model:
+        if not self.client:
             raise Exception("AI Model not configured. Check API Key in settings.")
 
-        parts = []
+        contents = []
         if system_prompt:
-            parts.append(system_prompt)
-        parts.append(user_prompt)
-        parts.append(image)
+            contents.append(system_prompt)
+        contents.append(user_prompt)
+        contents.append(image)
 
-        config = genai.GenerationConfig(
+        config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=InspectionResult
         )
 
         try:
             logger.info(f"Inspection request to {self.model_name}")
-            response = self.model.generate_content(parts, generation_config=config)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
             usage_data = self._extract_usage(response)
             logger.info(f"Token Usage: {usage_data}")
 
+            # Parse the JSON response
+            result_data = json.loads(response.text) if response.text else {}
+
             return {
-                "result": json.loads(response.text),
+                "result": result_data,
                 "usage": usage_data
             }
         except Exception as e:
@@ -187,13 +196,16 @@ class AIService:
         """
         self._configure()
 
-        if not self.model:
+        if not self.client:
             raise Exception("AI Model not configured.")
 
         try:
             logger.info(f"Report generation request to {self.model_name}")
             prompt = report_prompt or "Generate a summary report of the patrol."
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             usage_data = self._extract_usage(response)
             logger.info(f"Report Token Usage: {usage_data}")
 
@@ -208,47 +220,47 @@ class AIService:
     def analyze_video(self, video_path, user_prompt):
         """
         Analyze video content using Gemini.
-        
+
         Args:
             video_path: Path to video file
             user_prompt: Analysis prompt
-            
+
         Returns:
             dict with 'result' (text) and 'usage' (token counts)
         """
         self._configure()
-        
-        if not self.model:
-             raise Exception("AI Model not configured.")
-             
+
+        if not self.client:
+            raise Exception("AI Model not configured.")
+
         try:
             logger.info(f"Uploading video {video_path}...")
-            video_file = genai.upload_file(path=video_path)
-            
+            video_file = self.client.files.upload(file=video_path)
+
             # Wait for processing
-            import time
             while video_file.state.name == "PROCESSING":
                 time.sleep(2)
-                video_file = genai.get_file(video_file.name)
-                
+                video_file = self.client.files.get(name=video_file.name)
+
             if video_file.state.name == "FAILED":
                 raise Exception("Video processing failed.")
-                
+
             logger.info(f"Video ready. Analyzing with prompt: {user_prompt}")
-            
-            parts = [video_file, user_prompt]
-            response = self.model.generate_content(parts)
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[video_file, user_prompt]
+            )
             usage_data = self._extract_usage(response)
-            
-            # Cleanup? genai files persist for 48h. Maybe we want to keep it or let it expire.
-            # We will let it expire for now or explicit delete if needed.
-            
+
             return {
                 "result": response.text,
                 "usage": usage_data
             }
-            
+
         except Exception as e:
             logger.error(f"Video Analysis Error: {e}")
             raise
+
+
 ai_service = AIService()

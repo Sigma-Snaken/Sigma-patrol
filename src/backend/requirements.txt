@@ -2,6 +2,7 @@ flask
 kachaka-api
 numpy
 pillow
-google-generativeai
+google-genai
 reportlab
 opencv-python-headless
+requests
