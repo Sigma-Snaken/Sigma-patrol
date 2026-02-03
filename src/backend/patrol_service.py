@@ -12,10 +12,12 @@ from datetime import datetime
 from PIL import Image
 
 from config import SETTINGS_FILE, DEFAULT_SETTINGS, IMAGES_DIR, POINTS_FILE, DATA_DIR
+import requests
 from utils import load_json, save_json, get_current_time_str, get_filename_timestamp
 from database import get_db_connection, db_context, update_run_tokens
 from robot_service import robot_service
 from ai_service import ai_service, parse_ai_response
+from pdf_service import generate_patrol_report
 from logger import get_logger
 from video_recorder import VideoRecorder
 
@@ -518,8 +520,76 @@ class PatrolService:
                 )
 
             logger.info("Report generated and saved.")
+
+            # --- Telegram Notification ---
+            if settings.get('enable_telegram', False):
+                self._send_telegram_notification(settings, parsed['result_text'])
+
         except Exception as e:
             logger.error(f"Report Generation Error: {e}")
+
+    def _send_telegram_notification(self, settings, report_text):
+        """Send patrol report and PDF to Telegram."""
+        bot_token = settings.get('telegram_bot_token')
+        user_id = settings.get('telegram_user_id')
+
+        if not bot_token or not user_id:
+            logger.warning("Telegram enabled but token or user_id missing.")
+            return
+
+        try:
+            logger.info("Sending Telegram notification...")
+
+            # 1. Send Text Message
+            text_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            text_payload = {
+                "chat_id": user_id,
+                "text": f"🤖 *Patrol Completed*\n\n{report_text[:1000]}...", # Truncate if too long
+                "parse_mode": "Markdown"
+            }
+            resp = requests.post(text_url, json=text_payload, timeout=10)
+            if not resp.ok:
+                logger.error(f"Telegram Text Error: {resp.text}")
+
+            # 2. Send PDF Document with start_time in filename
+            try:
+                pdf_bytes = generate_patrol_report(self.current_run_id)
+
+                # Get start_time from database for filename
+                pdf_filename = f'Patrol_Report_{self.current_run_id}.pdf'  # Default fallback
+                try:
+                    with db_context() as (conn, cursor):
+                        cursor.execute('SELECT start_time FROM patrol_runs WHERE id = ?', (self.current_run_id,))
+                        row = cursor.fetchone()
+                        if row and row['start_time']:
+                            # Convert "YYYY-MM-DD HH:MM:SS" to "YYYY-MM-DD_HHMMSS"
+                            start_time_str = row['start_time']
+                            filename_ts = start_time_str.replace(" ", "_").replace(":", "")
+                            pdf_filename = f'Patrol_Report_{filename_ts}.pdf'
+                except Exception as e_db:
+                    logger.warning(f"Could not get start_time for PDF filename: {e_db}")
+
+                doc_url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+                files = {
+                    'document': (
+                        pdf_filename,
+                        pdf_bytes,
+                        'application/pdf'
+                    )
+                }
+                data = {'chat_id': user_id}
+
+                resp_doc = requests.post(doc_url, data=data, files=files, timeout=30)
+                if resp_doc.ok:
+                    logger.info("Telegram notification sent successfully.")
+                else:
+                    logger.error(f"Telegram PDF Error: {resp_doc.text}")
+
+            except Exception as e_pdf:
+                logger.error(f"Failed to generate/send PDF to Telegram: {e_pdf}")
+
+        except Exception as e:
+            logger.error(f"Telegram Notification Failed: {e}")
 
 
 patrol_service = PatrolService()

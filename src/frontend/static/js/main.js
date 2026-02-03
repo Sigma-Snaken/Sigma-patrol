@@ -131,6 +131,18 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- COLLAPSIBLE PANELS ---
+
+    // Toggle Analysis History (merged into Latest AI Analysis panel)
+    window.toggleAnalysisHistory = function() {
+        const container = document.getElementById('patrol-history-container');
+        const icon = document.getElementById('history-toggle-icon');
+        if (container) {
+            const isCollapsed = container.style.display === 'none';
+            container.style.display = isCollapsed ? 'block' : 'none';
+            if (icon) icon.textContent = isCollapsed ? '▲' : '▼';
+        }
+    };
+
     window.toggleHistoryLog = function () {
         const frame = document.getElementById('history-log-frame');
         if (frame) {
@@ -834,6 +846,16 @@ document.addEventListener('DOMContentLoaded', () => {
             currentIdleStreamEnabled = idleStreamCheckbox.checked;
         }
 
+        // Telegram Settings
+        const telegramCheckbox = document.getElementById('setting-enable-telegram');
+        if (telegramCheckbox) telegramCheckbox.checked = data.enable_telegram === true;
+
+        const telegramBotToken = document.getElementById('setting-telegram-bot-token');
+        if (telegramBotToken) telegramBotToken.value = data.telegram_bot_token || '';
+
+        const telegramUserId = document.getElementById('setting-telegram-user-id');
+        if (telegramUserId) telegramUserId.value = data.telegram_user_id || '';
+
         // Handle robot_ip if element exists (will be added to HTML next)
         const ipInput = document.getElementById('setting-robot-ip');
         if (ipInput) ipInput.value = data.robot_ip || '192.168.50.133:26400';
@@ -851,6 +873,10 @@ document.addEventListener('DOMContentLoaded', () => {
             enable_video_recording: document.getElementById('setting-enable-video').checked,
             video_prompt: document.getElementById('setting-video-prompt').value,
             enable_idle_stream: document.getElementById('setting-enable-idle-stream').checked,
+            enable_idle_stream: document.getElementById('setting-enable-idle-stream').checked,
+            enable_telegram: document.getElementById('setting-enable-telegram').checked,
+            telegram_bot_token: document.getElementById('setting-telegram-bot-token').value,
+            telegram_user_id: document.getElementById('setting-telegram-user-id').value,
             robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
         };
         try {
@@ -904,11 +930,11 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPatrolPoints.forEach(p => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)" style="width:100px; background:rgba(0,0,0,0.2); border:none; color:white;"></td>
-                    <td style="font-family:monospace; font-size:0.8rem;">X:${p.x.toFixed(2)} Y:${p.y.toFixed(2)} T:${p.theta.toFixed(2)}</td>
-                    <td><input type="text" value="${p.prompt || ''}" onchange="updatePoint('${p.id}', 'prompt', this.value)" style="width:200px; background:rgba(0,0,0,0.2); border:none; color:white;"></td>
+                    <td><input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)" style="width:100px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
+                    <td style="font-family:monospace; font-size:0.8rem; color:#333;">X:${p.x.toFixed(2)} Y:${p.y.toFixed(2)} T:${p.theta.toFixed(2)}</td>
+                    <td><input type="text" value="${p.prompt || ''}" onchange="updatePoint('${p.id}', 'prompt', this.value)" style="width:200px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
                     <td><input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${p.id}', 'enabled', this.checked)"></td>
-                    <td><button onclick="deletePoint('${p.id}')" style="color:red; background:none; border:none; cursor:pointer;">del</button></td>
+                    <td><button onclick="deletePoint('${p.id}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">del</button></td>
                 `;
                 pointsTableBody.appendChild(tr);
             });
@@ -921,21 +947,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>
-                        <input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)" 
-                            style="width:100%; min-width:80px; background:rgba(255,255,255,0.1); border:1px solid #444; border-radius:4px; color:white; padding:4px;">
+                        <input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)"
+                            style="width:100%; min-width:80px; background:rgba(0,0,0,0.03); border:1px solid #ccc; border-radius:4px; color:#333; padding:4px;">
                         <br>
-                        <span style="font-size:0.7rem; color:#888;">X:${p.x.toFixed(1)} Y:${p.y.toFixed(1)}</span>
+                        <span style="font-size:0.7rem; color:#555;">X:${p.x.toFixed(1)} Y:${p.y.toFixed(1)}</span>
                     </td>
                     <td>
-                        <textarea onchange="updatePoint('${p.id}', 'prompt', this.value)" 
-                            style="width:100%; height:50px; background:rgba(255,255,255,0.1); border:1px solid #444; border-radius:4px; color:white; padding:4px; resize:vertical;"
+                        <textarea onchange="updatePoint('${p.id}', 'prompt', this.value)"
+                            style="width:100%; height:50px; background:rgba(0,0,0,0.03); border:1px solid #ccc; border-radius:4px; color:#333; padding:4px; resize:vertical;"
                             placeholder="Prompt...">${p.prompt || ''}</textarea>
                     </td>
                     <td>
                         <button onclick="testPoint('${p.id}')" class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;">Test</button>
                     </td>
                     <td>
-                        <button onclick="deletePoint('${p.id}')" style="color:#ef5350; background:none; border:none; cursor:pointer;">🗑</button>
+                        <button onclick="deletePoint('${p.id}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">🗑</button>
                     </td>
                 `;
                 pointsTableQuickBody.appendChild(tr);
@@ -1042,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const outputResult = document.getElementById('ai-output-result');
         if (outputResult) {
             outputResult.textContent = `Moving to point "${point.name}"...`;
-            outputResult.style.color = "#26c6da";
+            outputResult.style.color = "#006b56";
         }
 
         // 1. Move to Point
@@ -1060,7 +1086,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             if (outputResult) {
                 outputResult.textContent = "Move Error: " + e.message;
-                outputResult.style.color = "#ef5350";
+                outputResult.style.color = "#dc3545";
             }
             return; // Stop if move failed
         }
@@ -1090,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // UI Loading State
         if (outputPrompt) outputPrompt.textContent = promptToSend || "(Default)";
         if (outputResult) {
-            outputResult.innerHTML = '<span style="color:#26c6da;">Analysing...</span>';
+            outputResult.innerHTML = '<span style="color:#006b56;">Analysing...</span>';
         }
 
         try {
@@ -1106,7 +1132,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (outputResult) {
                     outputResult.innerHTML = `<div class="ai-result-row">
                         <div class="status-indicator ng">!</div>
-                        <div class="status-text" style="color:#ef5350;">Error: ${data.error}</div>
+                        <div class="status-text" style="color:#dc3545;">Error: ${data.error}</div>
                     </div>`;
                 }
             } else {
@@ -1141,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             if (outputResult) {
-                outputResult.innerHTML = `<span style="color:#ef5350;">Network Error: ${e}</span>`;
+                outputResult.innerHTML = `<span style="color:#dc3545;">Network Error: ${e}</span>`;
             }
         }
     }
@@ -1204,6 +1230,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     async function startPatrol() {
+        // Clear history on patrol start
+        const resultsContainer = document.getElementById('results-container');
+        if (resultsContainer) resultsContainer.innerHTML = '';
+
         const res = await fetch('/api/patrol/start', { method: 'POST' });
         if (!res.ok) {
             const err = await res.json();
@@ -1330,7 +1360,7 @@ document.addEventListener('DOMContentLoaded', () => {
             results.slice().slice(-10).reverse().forEach(r => { // Show last 10 reversed
                 const card = document.createElement('div');
                 card.className = 'result-card';
-                card.style.background = 'rgba(255,255,255,0.05)';
+                card.style.background = 'rgba(0,0,0,0.03)';
                 card.style.padding = '8px';
                 card.style.borderRadius = '4px';
 
@@ -1338,8 +1368,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 card.innerHTML = `
                      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                         <span style="color:#26c6da; font-weight:bold;">${r.point_name}</span>
-                         <span style="font-size:0.7rem; color:#888;">${r.timestamp}</span>
+                         <span style="color:#006b56; font-weight:bold;">${r.point_name}</span>
+                         <span style="font-size:0.7rem; color:#555;">${r.timestamp}</span>
                      </div>
                      ${resultHTML}
                  `;
@@ -1355,15 +1385,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const resultHTML = renderAIResultHTML(newest.result);
 
                 latestBox.innerHTML = `
-                    <div style="font-weight:bold; color:#26c6da; margin-bottom:4px;">
-                        ${newest.point_name} 
-                        <span style="font-weight:normal; color:#888; font-size:0.8rem; float:right;">(${newest.timestamp})</span>
+                    <div style="font-weight:bold; color:#006b56; margin-bottom:4px;">
+                        ${newest.point_name}
+                        <span style="font-weight:normal; color:#555; font-size:0.8rem; float:right;">(${newest.timestamp})</span>
                     </div>
                     ${resultHTML}
                 `;
             } else {
                 latestBox.textContent = "No analysis data yet.";
-                latestBox.style.color = "#888";
+                latestBox.style.color = "#666";
                 latestBox.style.display = "flex";
                 latestBox.style.alignItems = "center";
                 latestBox.style.justifyContent = "center";
@@ -1377,7 +1407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const listContainer = document.getElementById('history-list');
         if (!listContainer) return;
 
-        listContainer.innerHTML = '<div style="color:#888; text-align:center;">Loading history...</div>';
+        listContainer.innerHTML = '<div style="color:#666; text-align:center;">Loading history...</div>';
 
         try {
             const res = await fetch('/api/history');
@@ -1386,43 +1416,43 @@ document.addEventListener('DOMContentLoaded', () => {
             listContainer.innerHTML = '';
 
             if (runs.length === 0) {
-                listContainer.innerHTML = '<div style="color:#888; text-align:center;">No patrol history found.</div>';
+                listContainer.innerHTML = '<div style="color:#666; text-align:center;">No patrol history found.</div>';
                 return;
             }
 
             runs.forEach(run => {
                 const card = document.createElement('div');
                 card.className = 'result-card';
-                card.style.background = 'rgba(255,255,255,0.08)';
+                card.style.background = 'rgba(0,0,0,0.03)';
                 card.style.padding = '15px';
                 card.style.borderRadius = '8px';
                 card.style.cursor = 'pointer';
-                card.style.border = '1px solid rgba(255,255,255,0.1)';
+                card.style.border = '1px solid rgba(0,0,0,0.08)';
                 card.style.transition = 'background 0.2s';
 
-                card.onmouseover = () => card.style.background = 'rgba(255,255,255,0.15)';
-                card.onmouseout = () => card.style.background = 'rgba(255,255,255,0.08)';
+                card.onmouseover = () => card.style.background = 'rgba(0,0,0,0.06)';
+                card.onmouseout = () => card.style.background = 'rgba(0,0,0,0.03)';
                 card.onclick = () => viewHistoryDetail(run.id);
 
-                const statusColor = run.status === 'Completed' ? '#00e676' : (run.status === 'Running' ? '#29b6f6' : '#ef5350');
+                const statusColor = run.status === 'Completed' ? '#28a745' : (run.status === 'Running' ? '#007bff' : '#dc3545');
 
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span style="font-weight:bold; font-size:1.1rem; color:#fff;">Patrol Run #${run.id}</span>
-                        <span style="font-size:0.8rem; background:${statusColor}; color:#000; padding:2px 8px; border-radius:4px; font-weight:bold;">${run.status}</span>
+                        <span style="font-weight:bold; font-size:1.1rem; color:#1a1a1a;">Patrol Run #${run.id}</span>
+                        <span style="font-size:0.8rem; background:${statusColor}; color:#fff; padding:2px 8px; border-radius:4px; font-weight:bold;">${run.status}</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#aaa;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#555;">
                         <span>Started: ${run.start_time}</span>
                         <span>Tokens: ${run.total_tokens || 0}</span>
                     </div>
                     <!-- <span>Robot: ${run.robot_serial || 'N/A'}</span> -->
-                    ${run.report_content ? `<div style="margin-top:10px; color:#ddd; font-size:0.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
+                    ${run.report_content ? `<div style="margin-top:10px; color:#333; font-size:0.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
                 `;
                 listContainer.appendChild(card);
             });
 
         } catch (e) {
-            listContainer.innerHTML = `<div style="color:#ef5350; text-align:center;">Error loading history: ${e}</div>`;
+            listContainer.innerHTML = `<div style="color:#dc3545; text-align:center;">Error loading history: ${e}</div>`;
         }
     }
 
@@ -1462,11 +1492,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Populate Inspections
             listDiv.innerHTML = '';
             if (inspections.length === 0) {
-                listDiv.innerHTML = '<div style="color:#888;">No inspections recorded for this run.</div>';
+                listDiv.innerHTML = '<div style="color:#666;">No inspections recorded for this run.</div>';
             } else {
                 inspections.forEach(ins => {
                     const item = document.createElement('div');
-                    item.style.background = 'rgba(0,0,0,0.3)';
+                    item.style.background = 'rgba(0,0,0,0.04)';
                     item.style.padding = '10px';
                     item.style.borderRadius = '6px';
                     item.style.display = 'flex';
@@ -1476,7 +1506,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Image
                     let imgHtml = '';
                     if (ins.image_path) {
-                        imgHtml = `<img src="/api/images/${ins.image_path}" style="width:120px; height:auto; border-radius:4px; border:1px solid #555;">`;
+                        imgHtml = `<img src="/api/images/${ins.image_path}" style="width:120px; height:auto; border-radius:4px; border:1px solid #ccc;">`;
                     }
 
                     const resultHTML = renderAIResultHTML(ins.ai_response);
@@ -1484,10 +1514,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     item.innerHTML = `
                         ${imgHtml}
                         <div style="flex:1;">
-                            <div style="font-weight:bold; color:#26c6da; margin-bottom:4px;">${ins.point_name}</div>
-                            <div style="font-size:0.8rem; color:#888; margin-bottom:6px;">${ins.timestamp}</div>
-                            <div style="background:rgba(255,255,255,0.05); padding:6px; border-radius:4px; font-size:0.85rem;">
-                                <div style="color:#aaa; font-style:italic; margin-bottom:4px;">Q: ${ins.prompt}</div>
+                            <div style="font-weight:bold; color:#006b56; margin-bottom:4px;">${ins.point_name}</div>
+                            <div style="font-size:0.8rem; color:#555; margin-bottom:6px;">${ins.timestamp}</div>
+                            <div style="background:rgba(0,0,0,0.03); padding:6px; border-radius:4px; font-size:0.85rem;">
+                                <div style="color:#555; font-style:italic; margin-bottom:4px;">Q: ${ins.prompt}</div>
                                 ${resultHTML}
                             </div>
                         </div>
@@ -1717,15 +1747,15 @@ document.addEventListener('DOMContentLoaded', () => {
             summaryEl.innerHTML = `
                 <div class="stat-item">
                     <span class="stat-label">Input Tokens</span>
-                    <span class="stat-value" style="color: #00e676;">${totalInput.toLocaleString()}</span>
+                    <span class="stat-value" style="color: #28a745;">${totalInput.toLocaleString()}</span>
                 </div>
                 <div class="stat-item">
                     <span class="stat-label">Output Tokens</span>
-                    <span class="stat-value" style="color: #ff9800;">${totalOutput.toLocaleString()}</span>
+                    <span class="stat-value" style="color: #e67e22;">${totalOutput.toLocaleString()}</span>
                 </div>
                 <div class="stat-item">
                     <span class="stat-label">Total Tokens</span>
-                    <span class="stat-value" style="color: #00f0ff;">${totalAll.toLocaleString()}</span>
+                    <span class="stat-value" style="color: #007bff;">${totalAll.toLocaleString()}</span>
                 </div>
             `;
         }
@@ -1751,13 +1781,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     {
                         label: 'Input Tokens',
                         data: inputValues,
-                        borderColor: '#00e676',
-                        backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
                         borderWidth: 2,
                         fill: false,
                         tension: 0.4,
-                        pointBackgroundColor: '#00e676',
-                        pointBorderColor: '#0a0e14',
+                        pointBackgroundColor: '#28a745',
+                        pointBorderColor: '#fff',
                         pointBorderWidth: 2,
                         pointRadius: 3,
                         pointHoverRadius: 5
@@ -1765,13 +1795,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     {
                         label: 'Output Tokens',
                         data: outputValues,
-                        borderColor: '#ff9800',
-                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        borderColor: '#e67e22',
+                        backgroundColor: 'rgba(230, 126, 34, 0.1)',
                         borderWidth: 2,
                         fill: false,
                         tension: 0.4,
-                        pointBackgroundColor: '#ff9800',
-                        pointBorderColor: '#0a0e14',
+                        pointBackgroundColor: '#e67e22',
+                        pointBorderColor: '#fff',
                         pointBorderWidth: 2,
                         pointRadius: 3,
                         pointHoverRadius: 5
@@ -1779,13 +1809,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     {
                         label: 'Total Tokens',
                         data: totalValues,
-                        borderColor: '#00f0ff',
-                        backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
                         borderWidth: 2,
                         fill: true,
                         tension: 0.4,
-                        pointBackgroundColor: '#00f0ff',
-                        pointBorderColor: '#0a0e14',
+                        pointBackgroundColor: '#007bff',
+                        pointBorderColor: '#fff',
                         pointBorderWidth: 2,
                         pointRadius: 4,
                         pointHoverRadius: 6
@@ -1802,37 +1832,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 scales: {
                     x: {
                         ticks: {
-                            color: '#5a7080',
-                            font: { family: "'JetBrains Mono', monospace", size: 10 }
+                            color: '#555',
+                            font: { family: "'IBM Plex Mono', monospace", size: 10 }
                         },
-                        grid: { color: 'rgba(0, 240, 255, 0.08)' }
+                        grid: { color: 'rgba(0, 0, 0, 0.08)' }
                     },
                     y: {
                         ticks: {
-                            color: '#5a7080',
-                            font: { family: "'JetBrains Mono', monospace", size: 10 }
+                            color: '#555',
+                            font: { family: "'IBM Plex Mono', monospace", size: 10 }
                         },
-                        grid: { color: 'rgba(0, 240, 255, 0.08)' },
+                        grid: { color: 'rgba(0, 0, 0, 0.08)' },
                         beginAtZero: true
                     }
                 },
                 plugins: {
                     legend: {
                         labels: {
-                            color: '#a4b8c4',
-                            font: { family: "'Orbitron', sans-serif", size: 11, weight: 600 }
+                            color: '#333',
+                            font: { family: "'Chakra Petch', sans-serif", size: 11, weight: 600 }
                         }
                     },
                     tooltip: {
-                        backgroundColor: '#151b23',
-                        titleColor: '#00f0ff',
-                        bodyColor: '#e8f4f8',
-                        borderColor: 'rgba(0, 240, 255, 0.25)',
+                        backgroundColor: '#f7f5f2',
+                        titleColor: '#007bff',
+                        bodyColor: '#333',
+                        borderColor: 'rgba(0, 0, 0, 0.15)',
                         borderWidth: 1,
                         cornerRadius: 4,
                         padding: 12,
-                        titleFont: { family: "'Orbitron', sans-serif", size: 11 },
-                        bodyFont: { family: "'JetBrains Mono', monospace", size: 12 }
+                        titleFont: { family: "'Chakra Petch', sans-serif", size: 11 },
+                        bodyFont: { family: "'IBM Plex Mono', monospace", size: 12 }
                     }
                 }
             }
