@@ -1,27 +1,58 @@
 # Deployment Guide
 
-## Docker Compose (Recommended)
-
-### Production Deployment
+## Quick Start
 
 ```bash
-# Pull and run the latest image
-docker compose -f deploy/docker-compose.prod.yaml up -d
+cd deploy
+
+# Pull and run
+docker compose -f docker-compose.prod.yaml up -d
 
 # View logs
-docker compose -f deploy/docker-compose.prod.yaml logs -f
+docker compose -f docker-compose.prod.yaml logs -f
 
 # Stop
-docker compose -f deploy/docker-compose.prod.yaml down
+docker compose -f docker-compose.prod.yaml down
 ```
 
-### Configuration
+Open `http://localhost:5000`, go to **Settings** to configure your Gemini API Key.
 
-After starting, configure via web UI at `http://localhost:5000`:
-1. Go to Settings tab
-2. Enter Gemini API Key
-3. Configure Robot IP
-4. Save Settings
+## Configuration
+
+Edit `docker-compose.prod.yaml` to set your robot's IP:
+
+```yaml
+environment:
+  - ROBOT_ID=robot-a
+  - ROBOT_NAME=Robot A
+  - ROBOT_IP=192.168.50.133:26400    # ← your robot's IP:port
+```
+
+## Adding More Robots
+
+1. Add a new service to `docker-compose.prod.yaml`:
+
+```yaml
+  robot-b:
+    container_name: visual_patrol_robot_b
+    image: ghcr.io/sigma-snaken/visual-patrol:latest
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+      - TZ=Asia/Taipei
+      - ROBOT_ID=robot-b
+      - ROBOT_NAME=Robot B
+      - ROBOT_IP=192.168.50.134:26400
+    restart: unless-stopped
+```
+
+2. Add `robot-b` to the nginx `depends_on` list.
+3. Run `docker compose -f docker-compose.prod.yaml up -d`.
+
+> Service name **must** match `ROBOT_ID` (e.g. `robot-b`). nginx uses the Docker service name to route requests.
 
 ## Docker Image
 

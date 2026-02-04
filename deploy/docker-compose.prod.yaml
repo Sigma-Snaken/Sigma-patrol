@@ -1,9 +1,18 @@
 services:
-  visual-patrol:
-    container_name: visual-patrol
-    image: ghcr.io/sigma-snaken/visual-patrol:latest
+  nginx:
+    image: nginx:alpine
+    container_name: visual_patrol_nginx
     ports:
       - "5000:5000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - robot-a
+    restart: unless-stopped
+
+  robot-a:
+    container_name: visual_patrol_robot_a
+    image: ghcr.io/sigma-snaken/visual-patrol:latest
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -11,14 +20,13 @@ services:
       - DATA_DIR=/app/data
       - LOG_DIR=/app/logs
       - TZ=Asia/Taipei
+      - ROBOT_ID=robot-a
+      - ROBOT_NAME=Robot A
+      - ROBOT_IP=192.168.50.133:26400
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/api/state" ]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/state')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-volumes:
-  visual-patrol-data:
-  visual-patrol-logs:
