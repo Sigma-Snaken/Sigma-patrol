@@ -1,23 +1,24 @@
 # Visual Patrol
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Flask](https://img.shields.io/badge/Flask-2.x-green)
+![Flask](https://img.shields.io/badge/Flask-3.x-green)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
 ![Gemini](https://img.shields.io/badge/AI-Google%20Gemini-orange)
 ![Platform](https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-lightgrey)
 
-Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google Gemini Vision AI** for intelligent environment monitoring and anomaly detection. A single web dashboard controls multiple robots through an nginx reverse proxy, with each robot running an isolated Flask backend.
+Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google Gemini Vision AI** for intelligent environment monitoring and anomaly detection. A single web dashboard controls multiple robots through an nginx reverse proxy, with each robot running an isolated Flask backend sharing a common SQLite database.
 
 ## Features
 
 - **Multi-Robot Support** - Single dashboard controls multiple robots via dropdown selector
 - **Autonomous Patrol** - Define waypoints per robot and let them navigate automatically
-- **AI-Powered Inspection** - Gemini Vision analyzes camera images for anomalies
+- **AI-Powered Inspection** - Gemini Vision analyzes camera images at each waypoint
 - **Video Recording** - Record patrol footage with codec auto-detection (H.264 / XVID / MJPEG)
-- **Real-time Dashboard** - Live map, robot position, battery, camera streams per robot
-- **Scheduled Patrols** - Per-robot recurring patrol times with day-of-week filtering
-- **Multi-day Analysis Reports** - AI-powered analysis reports across all robots
+- **Real-time Dashboard** - Live map, robot position, battery, camera streams
+- **Scheduled Patrols** - Recurring patrol times with day-of-week filtering
+- **Multi-day Analysis Reports** - AI-powered aggregated reports across date ranges
 - **PDF Reports** - Server-side PDF generation with Markdown and CJK support
+- **Telegram Notifications** - Send patrol reports and PDFs to Telegram on completion
 - **Manual Control** - Web-based remote control with D-pad navigation
 - **History & Analytics** - Browse past patrols with token usage statistics and robot filtering
 
@@ -45,7 +46,6 @@ Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google
 └─────────────────────────────────────────────────────┘
 ```
 
-**Key design decisions:**
 - nginx regex `^/api/(robot-[^/]+)/(.*)$` strips the robot ID and proxies to the matching Docker service
 - Docker service names **must** match robot IDs (`robot-a`, `robot-b`, etc.)
 - Global endpoints (`/api/settings`, `/api/robots`, `/api/history`, `/api/stats`) proxy to any backend (shared DB)
@@ -57,7 +57,7 @@ Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google
 docker compose up -d
 ```
 
-Open [http://localhost:5000](http://localhost:5000), then go to **Settings** to configure:
+Open [http://localhost:5000](http://localhost:5000), go to **Settings** and configure:
 
 1. **Google Gemini API Key**
 2. **Timezone**
@@ -73,7 +73,7 @@ Add a new service to `docker-compose.yml`:
     container_name: visual_patrol_robot_d
     build: .
     volumes:
-      - .:/app
+      - ./src:/app/src
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
@@ -83,7 +83,6 @@ Add a new service to `docker-compose.yml`:
       - ROBOT_ID=robot-d
       - ROBOT_NAME=Robot D
       - ROBOT_IP=192.168.50.135:26400
-    user: "1000:1000"
     restart: unless-stopped
 ```
 
@@ -93,9 +92,10 @@ Add `robot-d` to the nginx `depends_on` list, then `docker compose up -d`.
 
 ```
 visual-patrol/
-├── nginx.conf                  # Reverse proxy config
-├── docker-compose.yml          # nginx + per-robot services
-├── Dockerfile                  # Backend image (Python 3.10)
+├── nginx.conf                  # Dev reverse proxy config
+├── docker-compose.yml          # Dev: nginx + per-robot services (bridge network)
+├── Dockerfile                  # Backend image (Python 3.10, non-root user)
+├── .dockerignore
 ├── src/
 │   ├── backend/
 │   │   ├── app.py              # Flask REST API
@@ -116,11 +116,11 @@ visual-patrol/
 │       └── static/
 │           ├── css/style.css
 │           └── js/
-│               ├── app.js      # Entry point, robot selector
-│               ├── state.js    # Shared state (selectedRobotId)
+│               ├── app.js      # Entry point, tab switching, robot selector
+│               ├── state.js    # Shared state hub
 │               ├── map.js      # Canvas map rendering
 │               ├── controls.js # Manual D-pad control
-│               ├── patrol.js   # Patrol start/stop, status
+│               ├── patrol.js   # Patrol start/stop, status polling
 │               ├── points.js   # Waypoint CRUD
 │               ├── schedule.js # Scheduled patrols
 │               ├── ai.js       # AI test panel
@@ -129,8 +129,11 @@ visual-patrol/
 │               └── stats.js    # Token usage chart
 ├── data/                       # Shared runtime data (SQLite DB, images)
 ├── logs/                       # Per-robot application logs
-├── deploy/                     # Production compose file
-└── .github/workflows/          # CI/CD (multi-arch build)
+├── deploy/                     # Production config (host networking)
+│   ├── docker-compose.prod.yaml
+│   ├── nginx.conf
+│   └── README.md
+└── .github/workflows/          # CI/CD (multi-arch build → GHCR)
 ```
 
 ## API Reference
@@ -160,7 +163,7 @@ visual-patrol/
 | `/api/{id}/patrol/status` | GET | Current patrol status |
 | `/api/{id}/patrol/schedule` | GET/POST | Manage scheduled patrols |
 | `/api/{id}/patrol/schedule/{sid}` | PUT/DELETE | Update or delete schedule |
-| `/api/{id}/patrol/results` | GET | Recent inspection results |
+| `/api/{id}/patrol/results` | GET | Current run inspection results |
 
 ### Points (robot-specific)
 | Endpoint | Method | Description |
@@ -168,17 +171,17 @@ visual-patrol/
 | `/api/{id}/points` | GET/POST/DELETE | Manage patrol waypoints |
 | `/api/{id}/points/reorder` | POST | Reorder waypoints |
 | `/api/{id}/points/export` | GET | Export points as JSON |
-| `/api/{id}/points/import` | POST | Import points from JSON |
-| `/api/{id}/points/from_robot` | GET | Import locations from robot |
+| `/api/{id}/points/import` | POST | Import points from JSON file |
+| `/api/{id}/points/from_robot` | GET | Import saved locations from robot |
 | `/api/{id}/test_ai` | POST | Test AI on current camera frame |
 
 ### Global Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/settings` | GET/POST | System settings (shared) |
-| `/api/robots` | GET | All registered robots with status |
+| `/api/settings` | GET/POST | System settings (sensitive fields masked in GET) |
+| `/api/robots` | GET | All registered robots with online status |
 | `/api/history` | GET | Patrol history (`?robot_id=` filter) |
-| `/api/history/{run_id}` | GET | Patrol run details |
+| `/api/history/{run_id}` | GET | Patrol run detail with inspections |
 | `/api/report/{run_id}/pdf` | GET | Download single patrol PDF |
 | `/api/reports/generate` | POST | Generate multi-day analysis report |
 | `/api/reports/generate/pdf` | GET | Download multi-day analysis PDF |
@@ -196,14 +199,25 @@ Settings are stored in a shared SQLite database (`data/report/report.db`, table 
 | `system_prompt` | AI system role prompt |
 | `report_prompt` | Single patrol report generation prompt |
 | `multiday_report_prompt` | Multi-day aggregated report prompt |
-| `turbo_mode` | Enable async AI analysis |
+| `turbo_mode` | Async AI analysis (robot moves while images process) |
 | `enable_video_recording` | Record patrol video |
 | `video_prompt` | Video analysis prompt |
 | `enable_idle_stream` | Camera stream when not patrolling |
-| `enable_telegram` | Telegram notifications |
+| `enable_telegram` | Telegram notifications on patrol completion |
 | `telegram_bot_token` / `telegram_user_id` | Telegram config |
 
 Per-robot settings (`ROBOT_ID`, `ROBOT_NAME`, `ROBOT_IP`) are set via environment variables in `docker-compose.yml`.
+
+## Deployment
+
+Docker images are automatically built for **linux/amd64** and **linux/arm64** on every push to `main`.
+
+```bash
+# Production (host networking, for Jetson / Linux)
+docker compose -f deploy/docker-compose.prod.yaml up -d
+```
+
+See [deploy/README.md](deploy/README.md) for production setup including multi-robot configuration.
 
 ## Local Development
 
@@ -219,31 +233,17 @@ export ROBOT_IP=192.168.50.133:26400
 python src/backend/app.py
 ```
 
-## Deployment
-
-Docker images are automatically built for **linux/amd64** and **linux/arm64** on every push to `main`.
-
-```bash
-# Production deployment
-docker compose -f deploy/docker-compose.prod.yaml up -d
-
-# Or pull manually
-docker pull ghcr.io/sigma-snaken/visual-patrol:latest
-```
-
-See [deploy/README.md](deploy/README.md) for more details.
-
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
 | Robot shows "offline" | Check `ROBOT_IP` in docker-compose.yml; ensure robot is on same network |
 | Robot dropdown empty | Verify backends are running: `docker compose ps` |
-| AI analysis failed | Verify Gemini API key in Settings; check `logs/robot-a_ai_service.log` |
-| PDF generation failed | Check `logs/robot-a_app.log`; verify images in `data/{robot-id}/report/images/` |
+| AI analysis failed | Verify Gemini API key in Settings; check `logs/{robot-id}_ai_service.log` |
+| PDF generation failed | Check `logs/{robot-id}_app.log` |
 | Camera stream not loading | Enable "Continuous Camera Stream" in Settings; check robot connection |
-| Map not loading | Robot may still be connecting; check container logs for "Connected to Kachaka" |
+| Map not loading | Robot may still be connecting; check container logs for gRPC errors |
 
 ## License
 
-Developed for Kachaka Robot Integration.
+Copyright (c) 2026 Sigma Robotics. All rights reserved.
