@@ -95,7 +95,7 @@ visual-patrol/
 ## Local Development
 
 ```bash
-pip install -r src/backend/requirements.txt
+uv pip install --system -r src/backend/requirements.txt
 
 export DATA_DIR=$(pwd)/data
 export LOG_DIR=$(pwd)/logs
