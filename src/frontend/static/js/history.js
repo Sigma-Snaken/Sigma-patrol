@@ -1,5 +1,5 @@
 // history.js — History list, detail modal, report generation, PDF
-import state from './state.js';
+import state, { escapeHtml } from './state.js';
 import { renderAIResultHTML } from './ai.js';
 
 let robotsCache = null;
@@ -142,24 +142,24 @@ export async function loadHistory() {
 
             const statusColor = run.status === 'Completed' ? '#28a745' : (run.status === 'Running' ? '#007bff' : '#dc3545');
             const robotName = getRobotName(run.robot_id);
-            const robotTag = robotName ? `<span class="robot-tag">${robotName}</span>` : '';
+            const robotTag = robotName ? `<span class="robot-tag">${escapeHtml(robotName)}</span>` : '';
 
             card.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-weight:bold; font-size:1.1rem; color:#1a1a1a;">Patrol Run #${run.id} ${robotTag}</span>
-                    <span style="font-size:0.8rem; background:${statusColor}; color:#fff; padding:2px 8px; border-radius:4px; font-weight:bold;">${run.status}</span>
+                    <span style="font-size:0.8rem; background:${statusColor}; color:#fff; padding:2px 8px; border-radius:4px; font-weight:bold;">${escapeHtml(run.status)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#555;">
-                    <span>Started: ${run.start_time}</span>
+                    <span>Started: ${escapeHtml(run.start_time)}</span>
                     <span>Tokens: ${run.total_tokens || 0}</span>
                 </div>
-                ${run.report_content ? `<div style="margin-top:10px; color:#333; font-size:0.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${run.report_content}</div>` : ''}
+                ${run.report_content ? `<div style="margin-top:10px; color:#333; font-size:0.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${escapeHtml(run.report_content)}</div>` : ''}
             `;
             listContainer.appendChild(card);
         });
 
     } catch (e) {
-        listContainer.innerHTML = `<div style="color:#dc3545; text-align:center;">Error loading history: ${e}</div>`;
+        listContainer.innerHTML = `<div style="color:#dc3545; text-align:center;">Error loading history: ${escapeHtml(String(e))}</div>`;
     }
 }
 
@@ -219,10 +219,10 @@ async function viewHistoryDetail(runId) {
                 item.innerHTML = `
                     ${imgHtml}
                     <div style="flex:1;">
-                        <div style="font-weight:bold; color:#006b56; margin-bottom:4px;">${ins.point_name}</div>
-                        <div style="font-size:0.8rem; color:#555; margin-bottom:6px;">${ins.timestamp}</div>
+                        <div style="font-weight:bold; color:#006b56; margin-bottom:4px;">${escapeHtml(ins.point_name)}</div>
+                        <div style="font-size:0.8rem; color:#555; margin-bottom:6px;">${escapeHtml(ins.timestamp)}</div>
                         <div style="background:rgba(0,0,0,0.03); padding:6px; border-radius:4px; font-size:0.85rem;">
-                            <div style="color:#555; font-style:italic; margin-bottom:4px;">Q: ${ins.prompt}</div>
+                            <div style="color:#555; font-style:italic; margin-bottom:4px;">Q: ${escapeHtml(ins.prompt)}</div>
                             ${resultHTML}
                         </div>
                     </div>
@@ -232,7 +232,7 @@ async function viewHistoryDetail(runId) {
         }
 
     } catch (e) {
-        contentDiv.textContent = `Error: ${e}`;
+        contentDiv.textContent = `Error: ${String(e)}`;
     }
 }
 

@@ -1,5 +1,5 @@
 // settings.js — Settings load/save, clock, registered robots display
-import state from './state.js';
+import state, { escapeHtml } from './state.js';
 
 export function initSettings() {
     const btnSaveSettings = document.getElementById('btn-save-settings');
@@ -66,10 +66,10 @@ async function loadRobotsList() {
 
         container.innerHTML = robots.map(r => `
             <div class="robot-info-row">
-                <span class="robot-info-name">${r.robot_name}</span>
-                <span class="robot-info-id">${r.robot_id}</span>
-                <span class="robot-info-ip">${r.robot_ip || '-'}</span>
-                <span class="robot-info-status ${r.status === 'online' ? 'online' : 'offline'}">${r.status}</span>
+                <span class="robot-info-name">${escapeHtml(r.robot_name)}</span>
+                <span class="robot-info-id">${escapeHtml(r.robot_id)}</span>
+                <span class="robot-info-ip">${escapeHtml(r.robot_ip || '-')}</span>
+                <span class="robot-info-status ${r.status === 'online' ? 'online' : 'offline'}">${escapeHtml(r.status)}</span>
             </div>
         `).join('');
     } catch (e) {
@@ -78,8 +78,12 @@ async function loadRobotsList() {
 }
 
 async function saveSettings() {
+    const apiKeyVal = document.getElementById('setting-api-key').value;
+    const telegramTokenVal = document.getElementById('setting-telegram-bot-token').value;
+    const telegramUserVal = document.getElementById('setting-telegram-user-id').value;
+
     const settings = {
-        gemini_api_key: document.getElementById('setting-api-key').value,
+        gemini_api_key: apiKeyVal,
         gemini_model: document.getElementById('setting-model').value,
         timezone: document.getElementById('setting-timezone').value,
         system_prompt: document.getElementById('setting-role').value,
@@ -113,8 +117,10 @@ async function saveSettings() {
 }
 
 function startClock() {
+    if (state._intervals.clock) return; // Prevent duplicate intervals
+
     const timeValue = document.getElementById('time-value');
-    setInterval(() => {
+    state._intervals.clock = setInterval(() => {
         if (timeValue) {
             try {
                 timeValue.textContent = new Date().toLocaleTimeString('en-US', {

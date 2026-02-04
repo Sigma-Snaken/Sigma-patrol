@@ -1,8 +1,8 @@
-flask
-kachaka-api
-numpy
-pillow
-google-genai
-reportlab
-opencv-python-headless
-requests
+flask>=3.0,<4.0
+kachaka-api>=1.0,<2.0
+numpy>=2.2,<3.0
+pillow>=10.0,<11.0
+google-genai>=1.0,<2.0
+reportlab>=4.0,<5.0
+opencv-python-headless>=4.9,<5.0
+requests>=2.31,<3.0

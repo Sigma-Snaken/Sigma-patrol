@@ -1,6 +1,7 @@
 // schedule.js — Schedule CRUD, render list, next-patrol display
 import state from './state.js';
 
+
 let scheduledPatrols = [];
 const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -11,7 +12,9 @@ export function initSchedule() {
     }
 
     loadSchedule();
-    setInterval(updateNextPatrolDisplay, 60000);
+    if (!state._intervals.scheduleDisplay) {
+        state._intervals.scheduleDisplay = setInterval(updateNextPatrolDisplay, 60000);
+    }
 }
 
 export async function loadSchedule() {

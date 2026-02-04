@@ -17,7 +17,7 @@ services:
     container_name: visual_patrol_robot_a
     build: .
     volumes:
-      - .:/app
+      - ./src:/app/src
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
@@ -33,7 +33,7 @@ services:
     container_name: visual_patrol_robot_b
     build: .
     volumes:
-      - .:/app
+      - ./src:/app/src
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
@@ -49,7 +49,7 @@ services:
     container_name: visual_patrol_robot_c
     build: .
     volumes:
-      - .:/app
+      - ./src:/app/src
       - ./data:/app/data
       - ./logs:/app/logs
     environment:

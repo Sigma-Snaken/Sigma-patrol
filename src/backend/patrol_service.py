@@ -175,8 +175,15 @@ class PatrolService:
         with self.patrol_lock:
             if self.is_patrolling:
                 return False, "Already patrolling"
-            if self.patrol_thread and self.patrol_thread.is_alive():
-                self.patrol_thread.join(timeout=5)
+            old_thread = self.patrol_thread
+
+        # Join outside lock to avoid deadlock
+        if old_thread and old_thread.is_alive():
+            old_thread.join(timeout=5)
+
+        with self.patrol_lock:
+            if self.is_patrolling:  # Re-check after join
+                return False, "Already patrolling"
             self.is_patrolling = True
             with self.state_lock:
                 self.current_patrol_index = -1
@@ -340,42 +347,50 @@ class PatrolService:
         inspections_data = []
         turbo_mode = settings.get('turbo_mode', False)
 
-        # Main patrol loop
-        for i, point in enumerate(to_patrol):
-            with self.patrol_lock:
-                if not self.is_patrolling:
-                    break
+        try:
+            # Main patrol loop
+            for i, point in enumerate(to_patrol):
+                with self.patrol_lock:
+                    if not self.is_patrolling:
+                        break
 
-            self._set_patrol_index(i)
-            point_name = point.get('name', 'Unknown')
-            self._set_status(f"Moving to {point_name}...")
-            logger.info(f"Moving to {i+1}/{len(to_patrol)}: {point_name}")
+                self._set_patrol_index(i)
+                point_name = point.get('name', 'Unknown')
+                self._set_status(f"Moving to {point_name}...")
+                logger.info(f"Moving to {i+1}/{len(to_patrol)}: {point_name}")
 
-            # Move to point
-            move_status = self._move_to_point(point)
+                # Move to point
+                move_status = self._move_to_point(point)
 
-            if move_status != "Success":
-                self._save_inspection(
-                    self.current_run_id, point, point_name, "",
-                    {'result_text': "Move Failed", 'is_ng': True, 'description': move_status,
-                     'prompt_tokens': 0, 'candidate_tokens': 0, 'total_tokens': 0, 'usage_json': '{}'},
-                    "", move_status
+                if move_status != "Success":
+                    self._save_inspection(
+                        self.current_run_id, point, point_name, "",
+                        {'result_text': "Move Failed", 'is_ng': True, 'description': move_status,
+                         'prompt_tokens': 0, 'candidate_tokens': 0, 'total_tokens': 0, 'usage_json': '{}'},
+                        "", move_status
+                    )
+                    time.sleep(1)
+                    continue
+
+                with self.patrol_lock:
+                    if not self.is_patrolling:
+                        break
+
+                # Inspect point
+                self._set_status(f"Inspecting {point_name}...")
+                time.sleep(2)
+
+                self._inspect_point(
+                    point, point_name, run_images_dir, settings,
+                    turbo_mode, inspections_data
                 )
-                time.sleep(1)
-                continue
-
-            with self.patrol_lock:
-                if not self.is_patrolling:
-                    break
-
-            # Inspect point
-            self._set_status(f"Inspecting {point_name}...")
-            time.sleep(2)
-
-            self._inspect_point(
-                point, point_name, run_images_dir, settings,
-                turbo_mode, inspections_data
-            )
+        finally:
+            # Ensure video recorder is always stopped
+            if recorder:
+                try:
+                    recorder.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping video recorder: {e}")
 
         # Finalize patrol
         with self.patrol_lock:
@@ -385,10 +400,8 @@ class PatrolService:
         video_path = None
         video_analysis_text = None
 
-        if recorder:
-            recorder.stop()
-            if was_patrolling:
-                video_path = video_filename
+        if recorder and was_patrolling:
+            video_path = video_filename
 
         if was_patrolling:
             # In turbo mode, start returning home immediately while images are still processing
@@ -405,7 +418,7 @@ class PatrolService:
 
             time.sleep(2)
 
-            if recorder:
+            if recorder and video_path:
                 self._set_status("Analyzing Video...")
                 try:
                     vid_prompt = settings.get("video_prompt", "Analyze this patrol video.")

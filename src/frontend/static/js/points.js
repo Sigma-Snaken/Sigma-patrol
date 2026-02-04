@@ -1,5 +1,5 @@
 // points.js — Patrol points CRUD, render tables, import/export, reorder, highlight
-import state from './state.js';
+import state, { escapeHtml } from './state.js';
 import { draw } from './map.js';
 import { testAI } from './ai.js';
 
@@ -95,12 +95,13 @@ function renderPointsTable() {
         pointsTableBody.innerHTML = '';
         state.currentPatrolPoints.forEach(p => {
             const tr = document.createElement('tr');
+            const eid = escapeHtml(p.id);
             tr.innerHTML = `
-                <td><input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)" style="width:100px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
+                <td><input type="text" value="${escapeHtml(p.name || '')}" onchange="updatePoint('${eid}', 'name', this.value)" style="width:100px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
                 <td style="font-family:monospace; font-size:0.8rem; color:#333;">X:${p.x.toFixed(2)} Y:${p.y.toFixed(2)} T:${p.theta.toFixed(2)}</td>
-                <td><input type="text" value="${p.prompt || ''}" onchange="updatePoint('${p.id}', 'prompt', this.value)" style="width:200px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
-                <td><input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${p.id}', 'enabled', this.checked)"></td>
-                <td><button onclick="deletePoint('${p.id}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">del</button></td>
+                <td><input type="text" value="${escapeHtml(p.prompt || '')}" onchange="updatePoint('${eid}', 'prompt', this.value)" style="width:200px; background:rgba(0,0,0,0.03); border:1px solid #ccc; color:#333;"></td>
+                <td><input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${eid}', 'enabled', this.checked)"></td>
+                <td><button onclick="deletePoint('${eid}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">del</button></td>
             `;
             pointsTableBody.appendChild(tr);
         });
@@ -111,23 +112,24 @@ function renderPointsTable() {
         pointsTableQuickBody.innerHTML = '';
         state.currentPatrolPoints.forEach(p => {
             const tr = document.createElement('tr');
+            const eqid = escapeHtml(p.id);
             tr.innerHTML = `
                 <td>
-                    <input type="text" value="${p.name || ''}" onchange="updatePoint('${p.id}', 'name', this.value)"
+                    <input type="text" value="${escapeHtml(p.name || '')}" onchange="updatePoint('${eqid}', 'name', this.value)"
                         style="width:100%; min-width:80px; background:rgba(0,0,0,0.03); border:1px solid #ccc; border-radius:4px; color:#333; padding:4px;">
                     <br>
                     <span style="font-size:0.7rem; color:#555;">X:${p.x.toFixed(1)} Y:${p.y.toFixed(1)}</span>
                 </td>
                 <td>
-                    <textarea onchange="updatePoint('${p.id}', 'prompt', this.value)"
+                    <textarea onchange="updatePoint('${eqid}', 'prompt', this.value)"
                         style="width:100%; height:50px; background:rgba(0,0,0,0.03); border:1px solid #ccc; border-radius:4px; color:#333; padding:4px; resize:vertical;"
-                        placeholder="Prompt...">${p.prompt || ''}</textarea>
+                        placeholder="Prompt...">${escapeHtml(p.prompt || '')}</textarea>
                 </td>
                 <td>
-                    <button onclick="testPoint('${p.id}')" class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;">Test</button>
+                    <button onclick="testPoint('${eqid}')" class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;">Test</button>
                 </td>
                 <td>
-                    <button onclick="deletePoint('${p.id}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">🗑</button>
+                    <button onclick="deletePoint('${eqid}')" style="color:#dc3545; background:none; border:none; cursor:pointer;">🗑</button>
                 </td>
             `;
             pointsTableQuickBody.appendChild(tr);
@@ -146,13 +148,13 @@ function renderPointsTable() {
                          <button onclick="movePoint(${index}, -1)" class="btn-sm" style="font-size:0.7rem; padding:0 4px; line-height:1;" ${index === 0 ? 'disabled' : ''}>▲</button>
                          <button onclick="movePoint(${index}, 1)" class="btn-sm" style="font-size:0.7rem; padding:0 4px; line-height:1;" ${index === state.currentPatrolPoints.length - 1 ? 'disabled' : ''}>▼</button>
                      </div>
-                    <button onmousedown="setHighlight('${p.id}')" onmouseup="clearHighlight()" onmouseleave="clearHighlight()"
+                    <button onmousedown="setHighlight('${escapeHtml(p.id)}')" onmouseup="clearHighlight()" onmouseleave="clearHighlight()"
                         class="btn-secondary" style="width:100%; text-align:left; font-size:0.85rem; margin:0;">
-                        📍 ${p.name || 'Unnamed Point'}
+                        📍 ${escapeHtml(p.name || 'Unnamed Point')}
                     </button>
                 </td>
                 <td style="text-align:center;">
-                    <input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${p.id}', 'enabled', this.checked)">
+                    <input type="checkbox" ${p.enabled !== false ? 'checked' : ''} onchange="updatePoint('${escapeHtml(p.id)}', 'enabled', this.checked)">
                 </td>
             `;
             patrolViewBody.appendChild(tr);

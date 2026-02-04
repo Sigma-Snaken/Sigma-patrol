@@ -3,6 +3,8 @@ import time
 import io
 import json
 import os
+import re
+import math
 from datetime import datetime
 import flask
 from flask import Flask, jsonify, request, send_file, render_template, send_from_directory
@@ -13,9 +15,12 @@ from config import *
 from config import _LEGACY_SETTINGS_FILE, _LEGACY_IMAGES_DIR
 from utils import load_json, save_json
 from database import (
-    init_db, get_db_connection, save_generated_report,
+    init_db, db_context, save_generated_report,
     register_robot, backfill_robot_id, update_robot_heartbeat, get_all_robots
 )
+
+SENSITIVE_KEYS = ['gemini_api_key', 'telegram_bot_token', 'telegram_user_id']
+ROBOT_ID_PATTERN = re.compile(r'^robot-[a-z0-9-]+$')
 
 # Create directories and initialize DB before importing services
 # (services read DB at module level during instantiation)
@@ -93,6 +98,14 @@ def move_robot():
 
     if x is None or y is None:
         return jsonify({"error": "Missing x or y"}), 400
+
+    try:
+        x, y, theta = float(x), float(y), float(theta)
+    except (TypeError, ValueError):
+        return jsonify({"error": "x, y, theta must be numbers"}), 400
+
+    if not (-2 * math.pi <= theta <= 2 * math.pi):
+        return jsonify({"error": "theta must be between -2π and 2π"}), 400
 
     if robot_service.move_to(x, y, theta, wait=False):
         return jsonify({"status": "Moving", "target": {"x": x, "y": y, "theta": theta}})
@@ -195,6 +208,11 @@ def handle_settings():
         try:
             # Load existing settings to preserve keys not in request
             current_settings = settings_service.get_all()
+            # Skip masked sensitive values (don't overwrite real value with mask)
+            for key in SENSITIVE_KEYS:
+                val = new_settings.get(key, '')
+                if isinstance(val, str) and val.startswith('****'):
+                    new_settings.pop(key, None)
             current_settings.update(new_settings)
             # Exclude robot_ip from global settings (it's per-instance via env)
             current_settings.pop('robot_ip', None)
@@ -206,6 +224,10 @@ def handle_settings():
             return jsonify({"error": f"Failed to save settings: {str(e)}"}), 500
     else:
         settings = settings_service.get_all()
+        for key in SENSITIVE_KEYS:
+            val = settings.get(key, '')
+            if val:
+                settings[key] = '****' + val[-4:]
         return jsonify(settings)
 
 @app.route('/api/points', methods=['GET', 'POST', 'DELETE'])
@@ -215,6 +237,18 @@ def handle_points():
         return jsonify(points)
     elif request.method == 'POST':
         new_point = request.json
+        if not isinstance(new_point, dict):
+            return jsonify({"error": "Invalid point data"}), 400
+        if 'name' not in new_point or not isinstance(new_point['name'], str):
+            return jsonify({"error": "Point name is required"}), 400
+        if 'x' not in new_point or 'y' not in new_point:
+            return jsonify({"error": "Point x and y are required"}), 400
+        try:
+            new_point['x'] = float(new_point['x'])
+            new_point['y'] = float(new_point['y'])
+        except (TypeError, ValueError):
+            return jsonify({"error": "x and y must be numbers"}), 400
+
         if 'id' not in new_point:
             new_point['id'] = str(int(time.time() * 1000))
 
@@ -378,6 +412,10 @@ def handle_patrol_schedule():
         except ValueError:
             return jsonify({"error": "Invalid time format. Use HH:MM"}), 400
 
+        if days is not None:
+            if not isinstance(days, list) or not all(isinstance(d, int) and 0 <= d <= 6 for d in days):
+                return jsonify({"error": "days must be a list of integers 0-6"}), 400
+
         schedule = patrol_service.add_schedule(time_str, days, enabled)
         return jsonify({"status": "added", "schedule": schedule})
 
@@ -411,14 +449,12 @@ def get_patrol_results():
     if not current_run_id:
         return jsonify([])
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        'SELECT point_name, ai_response, timestamp FROM inspection_results WHERE run_id = ? ORDER BY id ASC',
-        (current_run_id,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    with db_context() as (conn, cursor):
+        cursor.execute(
+            'SELECT point_name, ai_response, timestamp FROM inspection_results WHERE run_id = ? ORDER BY id ASC',
+            (current_run_id,)
+        )
+        rows = cursor.fetchall()
 
     results = []
     for row in rows:
@@ -435,60 +471,56 @@ def get_patrol_results():
 def get_token_usage_stats():
     robot_id_filter = request.args.get('robot_id')
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    with db_context() as (conn, cursor):
+        # 1. Get stats from patrol_runs
+        if robot_id_filter:
+            query_runs = '''
+                SELECT substr(start_time, 1, 10) as date,
+                       SUM(COALESCE(prompt_tokens, 0)) as input,
+                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(total_tokens, 0)) as total
+                FROM patrol_runs
+                WHERE start_time IS NOT NULL AND robot_id = ?
+                GROUP BY substr(start_time, 1, 10)
+            '''
+            cursor.execute(query_runs, (robot_id_filter,))
+        else:
+            query_runs = '''
+                SELECT substr(start_time, 1, 10) as date,
+                       SUM(COALESCE(prompt_tokens, 0)) as input,
+                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(total_tokens, 0)) as total
+                FROM patrol_runs
+                WHERE start_time IS NOT NULL
+                GROUP BY substr(start_time, 1, 10)
+            '''
+            cursor.execute(query_runs)
+        run_rows = cursor.fetchall()
 
-    # 1. Get stats from patrol_runs
-    if robot_id_filter:
-        query_runs = '''
-            SELECT substr(start_time, 1, 10) as date,
-                   SUM(COALESCE(prompt_tokens, 0)) as input,
-                   SUM(COALESCE(candidate_tokens, 0)) as output,
-                   SUM(COALESCE(total_tokens, 0)) as total
-            FROM patrol_runs
-            WHERE start_time IS NOT NULL AND robot_id = ?
-            GROUP BY substr(start_time, 1, 10)
-        '''
-        cursor.execute(query_runs, (robot_id_filter,))
-    else:
-        query_runs = '''
-            SELECT substr(start_time, 1, 10) as date,
-                   SUM(COALESCE(prompt_tokens, 0)) as input,
-                   SUM(COALESCE(candidate_tokens, 0)) as output,
-                   SUM(COALESCE(total_tokens, 0)) as total
-            FROM patrol_runs
-            WHERE start_time IS NOT NULL
-            GROUP BY substr(start_time, 1, 10)
-        '''
-        cursor.execute(query_runs)
-    run_rows = cursor.fetchall()
-
-    # 2. Get stats from generated_reports
-    if robot_id_filter:
-        query_reports = '''
-            SELECT substr(timestamp, 1, 10) as date,
-                   SUM(COALESCE(prompt_tokens, 0)) as input,
-                   SUM(COALESCE(candidate_tokens, 0)) as output,
-                   SUM(COALESCE(total_tokens, 0)) as total
-            FROM generated_reports
-            WHERE timestamp IS NOT NULL AND robot_id = ?
-            GROUP BY substr(timestamp, 1, 10)
-        '''
-        cursor.execute(query_reports, (robot_id_filter,))
-    else:
-        query_reports = '''
-            SELECT substr(timestamp, 1, 10) as date,
-                   SUM(COALESCE(prompt_tokens, 0)) as input,
-                   SUM(COALESCE(candidate_tokens, 0)) as output,
-                   SUM(COALESCE(total_tokens, 0)) as total
-            FROM generated_reports
-            WHERE timestamp IS NOT NULL
-            GROUP BY substr(timestamp, 1, 10)
-        '''
-        cursor.execute(query_reports)
-    report_rows = cursor.fetchall()
-
-    conn.close()
+        # 2. Get stats from generated_reports
+        if robot_id_filter:
+            query_reports = '''
+                SELECT substr(timestamp, 1, 10) as date,
+                       SUM(COALESCE(prompt_tokens, 0)) as input,
+                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(total_tokens, 0)) as total
+                FROM generated_reports
+                WHERE timestamp IS NOT NULL AND robot_id = ?
+                GROUP BY substr(timestamp, 1, 10)
+            '''
+            cursor.execute(query_reports, (robot_id_filter,))
+        else:
+            query_reports = '''
+                SELECT substr(timestamp, 1, 10) as date,
+                       SUM(COALESCE(prompt_tokens, 0)) as input,
+                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(total_tokens, 0)) as total
+                FROM generated_reports
+                WHERE timestamp IS NOT NULL
+                GROUP BY substr(timestamp, 1, 10)
+            '''
+            cursor.execute(query_reports)
+        report_rows = cursor.fetchall()
 
     # Merge results
     usage_map = {}
@@ -532,33 +564,30 @@ def generate_report_route():
 
     try:
         # 1. Fetch Inspection Results
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
         query_start = f"{start_date} 00:00:00"
         query_end = f"{end_date} 23:59:59"
 
-        if report_robot_id:
-            cursor.execute('''
-                SELECT point_name, result, timestamp, is_ng, description FROM (
-                    SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
-                    FROM inspection_results
-                    WHERE timestamp BETWEEN ? AND ? AND robot_id = ?
-                    ORDER BY timestamp ASC
-                )
-            ''', (query_start, query_end, report_robot_id))
-        else:
-            cursor.execute('''
-                SELECT point_name, result, timestamp, is_ng, description FROM (
-                    SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
-                    FROM inspection_results
-                    WHERE timestamp BETWEEN ? AND ?
-                    ORDER BY timestamp ASC
-                )
-            ''', (query_start, query_end))
+        with db_context() as (conn, cursor):
+            if report_robot_id:
+                cursor.execute('''
+                    SELECT point_name, result, timestamp, is_ng, description FROM (
+                        SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
+                        FROM inspection_results
+                        WHERE timestamp BETWEEN ? AND ? AND robot_id = ?
+                        ORDER BY timestamp ASC
+                    )
+                ''', (query_start, query_end, report_robot_id))
+            else:
+                cursor.execute('''
+                    SELECT point_name, result, timestamp, is_ng, description FROM (
+                        SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
+                        FROM inspection_results
+                        WHERE timestamp BETWEEN ? AND ?
+                        ORDER BY timestamp ASC
+                    )
+                ''', (query_start, query_end))
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
         if not rows:
              return jsonify({"error": "No inspection data found for this period"}), 404
@@ -608,15 +637,13 @@ def generate_multiday_report_pdf():
 
     try:
         # Fetch the most recent generated report for this date range
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT report_content FROM generated_reports
-            WHERE start_date = ? AND end_date = ?
-            ORDER BY timestamp DESC LIMIT 1
-        ''', (start_date, end_date))
-        row = cursor.fetchone()
-        conn.close()
+        with db_context() as (conn, cursor):
+            cursor.execute('''
+                SELECT report_content FROM generated_reports
+                WHERE start_date = ? AND end_date = ?
+                ORDER BY timestamp DESC LIMIT 1
+            ''', (start_date, end_date))
+            row = cursor.fetchone()
 
         if not row or not row['report_content']:
             return jsonify({"error": "No report found for this date range. Please generate a report first."}), 404
@@ -650,22 +677,19 @@ def generate_multiday_report_pdf():
 def get_history():
     robot_id_filter = request.args.get('robot_id')
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    if robot_id_filter:
-        cursor.execute(
-            'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
-            'FROM patrol_runs WHERE robot_id = ? ORDER BY id DESC',
-            (robot_id_filter,)
-        )
-    else:
-        cursor.execute(
-            'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
-            'FROM patrol_runs ORDER BY id DESC'
-        )
-    rows = cursor.fetchall()
-    conn.close()
+    with db_context() as (conn, cursor):
+        if robot_id_filter:
+            cursor.execute(
+                'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
+                'FROM patrol_runs WHERE robot_id = ? ORDER BY id DESC',
+                (robot_id_filter,)
+            )
+        else:
+            cursor.execute(
+                'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
+                'FROM patrol_runs ORDER BY id DESC'
+            )
+        rows = cursor.fetchall()
 
     result = []
     for row in rows:
@@ -674,18 +698,14 @@ def get_history():
 
 @app.route('/api/history/<int:run_id>', methods=['GET'])
 def get_history_detail(run_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    with db_context() as (conn, cursor):
+        cursor.execute('SELECT * FROM patrol_runs WHERE id = ?', (run_id,))
+        run = cursor.fetchone()
+        if not run:
+            return jsonify({"error": "Run not found"}), 404
 
-    cursor.execute('SELECT * FROM patrol_runs WHERE id = ?', (run_id,))
-    run = cursor.fetchone()
-    if not run:
-        conn.close()
-        return jsonify({"error": "Run not found"}), 404
-
-    cursor.execute('SELECT * FROM inspection_results WHERE run_id = ?', (run_id,))
-    inspections = cursor.fetchall()
-    conn.close()
+        cursor.execute('SELECT * FROM inspection_results WHERE run_id = ?', (run_id,))
+        inspections = cursor.fetchall()
 
     return jsonify({
         "run": dict(run),
@@ -697,11 +717,9 @@ def download_pdf_report(run_id):
     """Generate and download PDF report for a patrol run"""
     try:
         # Get start_time for filename
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT start_time FROM patrol_runs WHERE id = ?', (run_id,))
-        row = cursor.fetchone()
-        conn.close()
+        with db_context() as (conn, cursor):
+            cursor.execute('SELECT start_time FROM patrol_runs WHERE id = ?', (run_id,))
+            row = cursor.fetchone()
 
         if row and row['start_time']:
             start_time_str = row['start_time'].replace(' ', '_').replace(':', '')
@@ -736,6 +754,8 @@ def serve_image(filename):
 @app.route('/api/robots/<robot_id>/images/<path:filename>')
 def serve_robot_image(robot_id, filename):
     """Serve images from any robot's directory."""
+    if not ROBOT_ID_PATTERN.match(robot_id):
+        return "Invalid robot ID", 400
     robot_images_dir = os.path.join(DATA_DIR, robot_id, "report", "images")
     if os.path.exists(os.path.join(robot_images_dir, filename)):
         return send_from_directory(robot_images_dir, filename)

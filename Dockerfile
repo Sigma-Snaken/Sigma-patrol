@@ -44,6 +44,13 @@ ENV LC_ALL=C.UTF-8
 # Set working directory to backend where app.py resides
 WORKDIR /app/src/backend
 
+# Create non-root user (UID 1000 to match typical host user for volume mounts)
+RUN groupadd -g 1000 appuser && \
+    useradd -u 1000 -g 1000 -r -s /bin/false appuser && \
+    mkdir -p /app/data /app/logs && \
+    chown -R appuser:appuser /app/data /app/logs
+USER appuser
+
 # Expose the Flask port
 EXPOSE 5000
 

@@ -1,5 +1,5 @@
 // patrol.js — Start/stop patrol, status polling, results display, camera stream
-import state from './state.js';
+import state, { escapeHtml } from './state.js';
 import { renderAIResultHTML } from './ai.js';
 
 let btnStartPatrol, btnStopPatrol;
@@ -32,7 +32,9 @@ async function stopPatrol() {
 }
 
 function startPatrolPolling() {
-    setInterval(async () => {
+    if (state._intervals.patrolPolling) return; // Prevent duplicate intervals
+
+    state._intervals.patrolPolling = setInterval(async () => {
         if (!state.selectedRobotId) return;
         const res = await fetch(`/api/${state.selectedRobotId}/patrol/status`);
         const data = await res.json();
@@ -99,8 +101,8 @@ export async function loadResults() {
 
             card.innerHTML = `
                  <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                     <span style="color:#006b56; font-weight:bold;">${r.point_name}</span>
-                     <span style="font-size:0.7rem; color:#555;">${r.timestamp}</span>
+                     <span style="color:#006b56; font-weight:bold;">${escapeHtml(r.point_name)}</span>
+                     <span style="font-size:0.7rem; color:#555;">${escapeHtml(r.timestamp)}</span>
                  </div>
                  ${resultHTML}
              `;
@@ -117,8 +119,8 @@ export async function loadResults() {
 
             latestBox.innerHTML = `
                 <div style="font-weight:bold; color:#006b56; margin-bottom:4px;">
-                    ${newest.point_name}
-                    <span style="font-weight:normal; color:#555; font-size:0.8rem; float:right;">(${newest.timestamp})</span>
+                    ${escapeHtml(newest.point_name)}
+                    <span style="font-weight:normal; color:#555; font-size:0.8rem; float:right;">(${escapeHtml(newest.timestamp)})</span>
                 </div>
                 ${resultHTML}
             `;

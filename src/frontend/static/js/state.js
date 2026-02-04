@@ -21,6 +21,25 @@ const state = {
     // Multi-robot
     selectedRobotId: null,
     availableRobots: [],
+
+    // Interval tracking for cleanup
+    _intervals: {
+        statePolling: null,
+        patrolPolling: null,
+        robotFetch: null,
+        clock: null,
+        scheduleDisplay: null,
+    },
 };
+
+export function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 export default state;

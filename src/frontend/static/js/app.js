@@ -193,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     startPolling();
 
     // Refresh robot list every 5s
-    setInterval(fetchRobots, 5000);
+    state._intervals.robotFetch = setInterval(fetchRobots, 5000);
 
     // Robot selector change event
     const select = document.getElementById('robot-select');

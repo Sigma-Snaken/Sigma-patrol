@@ -243,11 +243,13 @@ function handleMouseUp(e) {
 
 // Polling for robot state
 export function startPolling() {
+    if (state._intervals.statePolling) return; // Prevent duplicate intervals
+
     const batteryValue = document.getElementById('battery-value');
     const poseDisplay = document.getElementById('pose-display');
     const connectionStatus = document.getElementById('connection-status');
 
-    setInterval(async () => {
+    state._intervals.statePolling = setInterval(async () => {
         if (!state.selectedRobotId) return;
         try {
             const response = await fetch(`/api/${state.selectedRobotId}/state`);

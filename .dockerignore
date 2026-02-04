@@ -1,0 +1,9 @@
+.git
+.github
+data
+logs
+*.md
+.claude
+deploy
+__pycache__
+*.pyc

@@ -1,5 +1,5 @@
 // ai.js — AI test, parseAIResponse, renderAIResultHTML (shared utility)
-import state from './state.js';
+import state, { escapeHtml } from './state.js';
 
 export function initAI() {
     const btnTestAI = document.getElementById('btn-test-ai');
@@ -40,7 +40,7 @@ export async function testAI(overridePrompt = null) {
             if (outputResult) {
                 outputResult.innerHTML = `<div class="ai-result-row">
                     <div class="status-indicator ng">!</div>
-                    <div class="status-text" style="color:#dc3545;">Error: ${data.error}</div>
+                    <div class="status-text" style="color:#dc3545;">Error: ${escapeHtml(data.error)}</div>
                 </div>`;
             }
         } else {
@@ -63,13 +63,13 @@ export async function testAI(overridePrompt = null) {
                 outputResult.innerHTML = `
                 <div class="ai-result-row">
                     <div class="status-indicator ${statusClass}">${statusLabel}</div>
-                    <div class="status-text">${desc || (isNG ? "Anomaly Detected" : "Normal")}</div>
+                    <div class="status-text">${escapeHtml(desc) || (isNG ? "Anomaly Detected" : "Normal")}</div>
                 </div>`;
             }
         }
     } catch (e) {
         if (outputResult) {
-            outputResult.innerHTML = `<span style="color:#dc3545;">Network Error: ${e}</span>`;
+            outputResult.innerHTML = `<span style="color:#dc3545;">Network Error: ${escapeHtml(String(e))}</span>`;
         }
     }
 }
@@ -102,7 +102,7 @@ export function renderAIResultHTML(responseStr) {
     return `
         <div class="ai-result-row" style="margin-top:5px;">
             <div class="status-indicator ${statusClass}">${statusLabel}</div>
-            <div class="status-text">${desc || (isNG ? "Anomaly Detected" : "Normal")}</div>
+            <div class="status-text">${escapeHtml(desc) || (isNG ? "Anomaly Detected" : "Normal")}</div>
         </div>
     `;
 }
