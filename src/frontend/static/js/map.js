@@ -20,8 +20,20 @@ export function initMap() {
     loadMap();
 }
 
+export function resetMap() {
+    state.mapImage.src = '';
+    state.mapInfo = null;
+    state.isMapLoaded = false;
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+    loadMap();
+}
+
 function loadMap() {
-    const url = '/api/map?t=' + new Date().getTime();
+    if (!state.selectedRobotId) {
+        setTimeout(loadMap, 500);
+        return;
+    }
+    const url = `/api/${state.selectedRobotId}/map?t=` + new Date().getTime();
     state.mapImage.src = url;
     state.mapImage.style.display = 'none';
     window.debugMapImage = state.mapImage;
@@ -218,7 +230,7 @@ function handleMouseUp(e) {
     }
 
     // Inline moveRobot call to avoid circular dep with controls.js
-    fetch('/api/move', {
+    fetch(`/api/${state.selectedRobotId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ x: targetX, y: targetY, theta })
@@ -236,8 +248,9 @@ export function startPolling() {
     const connectionStatus = document.getElementById('connection-status');
 
     setInterval(async () => {
+        if (!state.selectedRobotId) return;
         try {
-            const response = await fetch('/api/state');
+            const response = await fetch(`/api/${state.selectedRobotId}/state`);
             if (response.ok) {
                 const data = await response.json();
                 if (data.battery !== undefined) batteryValue.textContent = Math.floor(data.battery) + '%';

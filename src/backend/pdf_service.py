@@ -21,7 +21,7 @@ from reportlab.platypus import (
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 
-from config import IMAGES_DIR
+from config import ROBOT_IMAGES_DIR, _LEGACY_IMAGES_DIR, DATA_DIR
 from database import get_db_connection
 
 # Register CID font for Chinese support
@@ -665,7 +665,14 @@ def generate_patrol_report(run_id):
 
             image_path = ins.get('image_path')
             if image_path:
-                full_image_path = os.path.join(IMAGES_DIR, image_path)
+                # Try robot-specific dir, then cross-robot dir, then legacy dir
+                full_image_path = os.path.join(ROBOT_IMAGES_DIR, image_path)
+                if not os.path.exists(full_image_path):
+                    rid = ins.get('robot_id')
+                    if rid:
+                        full_image_path = os.path.join(DATA_DIR, rid, "report", "images", image_path)
+                if not os.path.exists(full_image_path):
+                    full_image_path = os.path.join(_LEGACY_IMAGES_DIR, image_path)
                 if os.path.exists(full_image_path):
                     try:
                         img = Image(full_image_path)

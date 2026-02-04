@@ -1,20 +1,34 @@
 import os
+import shutil
 
-ROBOT_IP = "192.168.50.133:26400"
+# Robot identity (from environment, defaults to single-robot mode)
+ROBOT_ID = os.getenv("ROBOT_ID", "default")
+ROBOT_NAME = os.getenv("ROBOT_NAME", "Robot")
+ROBOT_IP = os.getenv("ROBOT_IP", "192.168.50.133:26400")
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
 LOG_DIR = os.getenv("LOG_DIR", os.path.join(BASE_DIR, "logs"))
 
-CONFIG_DIR = os.path.join(DATA_DIR, "config")
+# Shared paths
 REPORT_DIR = os.path.join(DATA_DIR, "report")
-IMAGES_DIR = os.path.join(REPORT_DIR, "images")
-
-POINTS_FILE = os.path.join(CONFIG_DIR, "points.json")
-SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
-RESULTS_FILE = os.path.join(REPORT_DIR, "results.json")
 DB_FILE = os.path.join(REPORT_DIR, "report.db")
+
+# Per-robot paths
+ROBOT_DATA_DIR = os.path.join(DATA_DIR, ROBOT_ID)
+ROBOT_CONFIG_DIR = os.path.join(ROBOT_DATA_DIR, "config")
+ROBOT_IMAGES_DIR = os.path.join(ROBOT_DATA_DIR, "report", "images")
+
+POINTS_FILE = os.path.join(ROBOT_CONFIG_DIR, "points.json")
+SCHEDULE_FILE = os.path.join(ROBOT_CONFIG_DIR, "patrol_schedule.json")
+
+# Legacy paths (for migration)
+_LEGACY_CONFIG_DIR = os.path.join(DATA_DIR, "config")
+_LEGACY_POINTS_FILE = os.path.join(_LEGACY_CONFIG_DIR, "points.json")
+_LEGACY_SCHEDULE_FILE = os.path.join(_LEGACY_CONFIG_DIR, "patrol_schedule.json")
+_LEGACY_SETTINGS_FILE = os.path.join(_LEGACY_CONFIG_DIR, "settings.json")
+_LEGACY_IMAGES_DIR = os.path.join(REPORT_DIR, "images")
 
 DEFAULT_SETTINGS = {
     "gemini_api_key": "",
@@ -29,7 +43,7 @@ DEFAULT_SETTINGS = {
 **背景資訊/表格結構：**
 以下是本次巡檢的項目清單。請以這個結構為基礎，進行評估與填寫。
 
-| 類別 (Category) | 編號 (No.) | 巡檢項目 (Check Item) | 
+| 類別 (Category) | 編號 (No.) | 巡檢項目 (Check Item) |
 | :--- | :--- | :--- |
 | 用電安全 | 1 | 公共區域電氣設備使用完畢是否依程序關閉—廁所及走廊 |
 | 用電安全 | 2 | 公共區域是否不當使用插座—辨識公共插座是否沒有插線 |
@@ -51,8 +65,22 @@ DEFAULT_SETTINGS = {
     "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies."
 }
 
+
 def ensure_dirs():
-    os.makedirs(CONFIG_DIR, exist_ok=True)
     os.makedirs(REPORT_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
-    os.makedirs(IMAGES_DIR, exist_ok=True)
+    os.makedirs(ROBOT_CONFIG_DIR, exist_ok=True)
+    os.makedirs(ROBOT_IMAGES_DIR, exist_ok=True)
+
+
+def migrate_legacy_files():
+    """Migrate legacy config files to per-robot directories (one-time)."""
+    # Migrate points.json
+    if os.path.exists(_LEGACY_POINTS_FILE) and not os.path.exists(POINTS_FILE):
+        print(f"Migrating points.json to {POINTS_FILE}")
+        shutil.copy2(_LEGACY_POINTS_FILE, POINTS_FILE)
+
+    # Migrate patrol_schedule.json
+    if os.path.exists(_LEGACY_SCHEDULE_FILE) and not os.path.exists(SCHEDULE_FILE):
+        print(f"Migrating patrol_schedule.json to {SCHEDULE_FILE}")
+        shutil.copy2(_LEGACY_SCHEDULE_FILE, SCHEDULE_FILE)

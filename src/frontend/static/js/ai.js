@@ -28,7 +28,7 @@ export async function testAI(overridePrompt = null) {
     }
 
     try {
-        const res = await fetch('/api/test_ai', {
+        const res = await fetch(`/api/${state.selectedRobotId}/test_ai`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: promptToSend })

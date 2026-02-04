@@ -8,10 +8,21 @@ import flask
 from flask import Flask, jsonify, request, send_file, render_template, send_from_directory
 from PIL import Image
 
-# New Modules
+# Config and infrastructure (must run before service imports)
 from config import *
+from config import _LEGACY_SETTINGS_FILE, _LEGACY_IMAGES_DIR
 from utils import load_json, save_json
-from database import init_db, get_db_connection, save_generated_report
+from database import (
+    init_db, get_db_connection, save_generated_report,
+    register_robot, backfill_robot_id, update_robot_heartbeat, get_all_robots
+)
+
+# Create directories and initialize DB before importing services
+# (services read DB at module level during instantiation)
+ensure_dirs()
+init_db()
+
+import settings_service
 from robot_service import robot_service
 from patrol_service import patrol_service
 from ai_service import ai_service
@@ -19,27 +30,22 @@ from pdf_service import generate_patrol_report, generate_analysis_report
 
 import logging
 
-app = Flask(__name__, 
+app = Flask(__name__,
             template_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend', 'templates'),
             static_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend', 'static'))
 
-# Ensure dirs
-ensure_dirs()
-
 # Logging
-# Use TimezoneFormatter for root logger or app logger
 from logger import TimezoneFormatter
 
-# Since basicConfig is tricky to override completely if handlers exist,
-# let's just setup the root logger manually to match our needs.
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 
 if not root_logger.handlers:
     formatter = TimezoneFormatter('%(asctime)s %(levelname)s: %(message)s')
 
-    # File handler for app.log
-    file_handler = logging.FileHandler(os.path.join(LOG_DIR, "app.log"))
+    # File handler with robot-prefixed log
+    log_filename = f"{ROBOT_ID}_app.log" if ROBOT_ID != "default" else "app.log"
+    file_handler = logging.FileHandler(os.path.join(LOG_DIR, log_filename))
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
@@ -48,8 +54,7 @@ if not root_logger.handlers:
     stream_handler.setFormatter(formatter)
     root_logger.addHandler(stream_handler)
 
-# Suppress Flask/Werkzeug request logs to focus on application logs
-# (robot actions, AI analysis, report generation)
+# Suppress Flask/Werkzeug request logs
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 @app.route('/')
@@ -58,17 +63,25 @@ def index():
 
 @app.route('/api/state')
 def get_state():
-    return jsonify(robot_service.get_state())
+    state = robot_service.get_state()
+    state['robot_id'] = ROBOT_ID
+    state['robot_name'] = ROBOT_NAME
+    return jsonify(state)
+
+@app.route('/api/robot_info')
+def get_robot_info():
+    return jsonify({"robot_id": ROBOT_ID, "robot_name": ROBOT_NAME})
+
+@app.route('/api/robots')
+def get_robots():
+    return jsonify(get_all_robots())
 
 @app.route('/api/map')
 def get_map():
     map_bytes = robot_service.get_map_bytes()
-    # print("Received request for /api/map")
     if map_bytes:
-        # print(f"Serving map, size: {len(map_bytes)} bytes")
         return send_file(io.BytesIO(map_bytes), mimetype='image/png')
     else:
-        # print("Map not not available yet")
         return "Map not available", 404
 
 @app.route('/api/move', methods=['POST'])
@@ -77,10 +90,10 @@ def move_robot():
     x = data.get('x')
     y = data.get('y')
     theta = data.get('theta', 0.0)
-    
+
     if x is None or y is None:
         return jsonify({"error": "Missing x or y"}), 400
-        
+
     if robot_service.move_to(x, y, theta, wait=False):
         return jsonify({"status": "Moving", "target": {"x": x, "y": y, "theta": theta}})
     else:
@@ -90,10 +103,10 @@ def move_robot():
 def manual_control():
     data = request.json
     action = data.get('action')
-    
+
     try:
         if action == 'forward':
-            robot_service.move_forward(distance=0.1, speed=0.1) 
+            robot_service.move_forward(distance=0.1, speed=0.1)
         elif action == 'backward':
             robot_service.move_forward(distance=-0.1, speed=0.1)
         elif action == 'left':
@@ -102,7 +115,7 @@ def manual_control():
              robot_service.rotate(angle=-0.1745) # ~-10 degrees
         else:
             return jsonify({"error": "Invalid action"}), 400
-            
+
         return jsonify({"status": "Command sent", "action": action})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -152,13 +165,13 @@ def test_ai_route():
              return jsonify({"error": "Robot camera not available"}), 503
 
         image = Image.open(io.BytesIO(img_response.data))
-        
+
         user_prompt = request.json.get('prompt', 'Describe what you see and check if everything is normal.')
-        settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+        settings = settings_service.get_all()
         sys_prompt = settings.get('system_prompt', '')
-        
+
         response_obj = ai_service.generate_inspection(image, user_prompt, sys_prompt)
-        
+
         # Handle new structure
         if isinstance(response_obj, dict) and "result" in response_obj:
             result_text = response_obj["result"]
@@ -168,7 +181,7 @@ def test_ai_route():
             usage_data = {}
 
         return jsonify({"result": result_text, "prompt": user_prompt, "usage": usage_data})
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -180,22 +193,20 @@ def handle_settings():
     if request.method == 'POST':
         new_settings = request.json
         try:
-            # Load existing settings to preserve keys not in prompt
-            current_settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+            # Load existing settings to preserve keys not in request
+            current_settings = settings_service.get_all()
             current_settings.update(new_settings)
-            
-            save_json(SETTINGS_FILE, current_settings)
+            # Exclude robot_ip from global settings (it's per-instance via env)
+            current_settings.pop('robot_ip', None)
+
+            settings_service.save(current_settings)
             return jsonify({"status": "saved"})
         except Exception as e:
             logging.error(f"Failed to save settings: {e}")
             return jsonify({"error": f"Failed to save settings: {str(e)}"}), 500
     else:
-        # Load file settings, but ensure all keys from DEFAULT_SETTINGS exist
-        file_settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
-        # Merge: Default < File
-        final_settings = DEFAULT_SETTINGS.copy()
-        final_settings.update(file_settings)
-        return jsonify(final_settings)
+        settings = settings_service.get_all()
+        return jsonify(settings)
 
 @app.route('/api/points', methods=['GET', 'POST', 'DELETE'])
 def handle_points():
@@ -422,33 +433,59 @@ def get_patrol_results():
 
 @app.route('/api/stats/token_usage', methods=['GET'])
 def get_token_usage_stats():
+    robot_id_filter = request.args.get('robot_id')
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. Get stats from patrol_runs (includes inspection_results tokens via update_run_tokens)
-    query_runs = '''
-        SELECT substr(start_time, 1, 10) as date,
-               SUM(COALESCE(prompt_tokens, 0)) as input,
-               SUM(COALESCE(candidate_tokens, 0)) as output,
-               SUM(COALESCE(total_tokens, 0)) as total
-        FROM patrol_runs
-        WHERE start_time IS NOT NULL
-        GROUP BY substr(start_time, 1, 10)
-    '''
-    cursor.execute(query_runs)
+    # 1. Get stats from patrol_runs
+    if robot_id_filter:
+        query_runs = '''
+            SELECT substr(start_time, 1, 10) as date,
+                   SUM(COALESCE(prompt_tokens, 0)) as input,
+                   SUM(COALESCE(candidate_tokens, 0)) as output,
+                   SUM(COALESCE(total_tokens, 0)) as total
+            FROM patrol_runs
+            WHERE start_time IS NOT NULL AND robot_id = ?
+            GROUP BY substr(start_time, 1, 10)
+        '''
+        cursor.execute(query_runs, (robot_id_filter,))
+    else:
+        query_runs = '''
+            SELECT substr(start_time, 1, 10) as date,
+                   SUM(COALESCE(prompt_tokens, 0)) as input,
+                   SUM(COALESCE(candidate_tokens, 0)) as output,
+                   SUM(COALESCE(total_tokens, 0)) as total
+            FROM patrol_runs
+            WHERE start_time IS NOT NULL
+            GROUP BY substr(start_time, 1, 10)
+        '''
+        cursor.execute(query_runs)
     run_rows = cursor.fetchall()
 
     # 2. Get stats from generated_reports
-    query_reports = '''
-        SELECT substr(timestamp, 1, 10) as date,
-               SUM(COALESCE(prompt_tokens, 0)) as input,
-               SUM(COALESCE(candidate_tokens, 0)) as output,
-               SUM(COALESCE(total_tokens, 0)) as total
-        FROM generated_reports
-        WHERE timestamp IS NOT NULL
-        GROUP BY substr(timestamp, 1, 10)
-    '''
-    cursor.execute(query_reports)
+    if robot_id_filter:
+        query_reports = '''
+            SELECT substr(timestamp, 1, 10) as date,
+                   SUM(COALESCE(prompt_tokens, 0)) as input,
+                   SUM(COALESCE(candidate_tokens, 0)) as output,
+                   SUM(COALESCE(total_tokens, 0)) as total
+            FROM generated_reports
+            WHERE timestamp IS NOT NULL AND robot_id = ?
+            GROUP BY substr(timestamp, 1, 10)
+        '''
+        cursor.execute(query_reports, (robot_id_filter,))
+    else:
+        query_reports = '''
+            SELECT substr(timestamp, 1, 10) as date,
+                   SUM(COALESCE(prompt_tokens, 0)) as input,
+                   SUM(COALESCE(candidate_tokens, 0)) as output,
+                   SUM(COALESCE(total_tokens, 0)) as total
+            FROM generated_reports
+            WHERE timestamp IS NOT NULL
+            GROUP BY substr(timestamp, 1, 10)
+        '''
+        cursor.execute(query_reports)
     report_rows = cursor.fetchall()
 
     conn.close()
@@ -488,55 +525,66 @@ def generate_report_route():
     start_date = data.get('start_date')
     end_date = data.get('end_date')
     user_prompt = data.get('prompt')
-    
+    report_robot_id = data.get('robot_id')
+
     if not start_date or not end_date:
         return jsonify({"error": "Start date and end date are required"}), 400
-        
+
     try:
         # 1. Fetch Inspection Results
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # Adjust end_date to include the full day (e.g. 2025-01-01 -> 2025-01-01 23:59:59)
-        # Assuming inputs are YYYY-MM-DD
+
         query_start = f"{start_date} 00:00:00"
         query_end = f"{end_date} 23:59:59"
-        
-        cursor.execute('''
-            SELECT point_name, result, timestamp, is_ng, description FROM (
-                SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description 
-                FROM inspection_results 
-                WHERE timestamp BETWEEN ? AND ?
-                ORDER BY timestamp ASC
-            )
-        ''', (query_start, query_end))
-        
+
+        if report_robot_id:
+            cursor.execute('''
+                SELECT point_name, result, timestamp, is_ng, description FROM (
+                    SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
+                    FROM inspection_results
+                    WHERE timestamp BETWEEN ? AND ? AND robot_id = ?
+                    ORDER BY timestamp ASC
+                )
+            ''', (query_start, query_end, report_robot_id))
+        else:
+            cursor.execute('''
+                SELECT point_name, result, timestamp, is_ng, description FROM (
+                    SELECT point_name, ai_response as result, timestamp, is_ng, ai_description as description
+                    FROM inspection_results
+                    WHERE timestamp BETWEEN ? AND ?
+                    ORDER BY timestamp ASC
+                )
+            ''', (query_start, query_end))
+
         rows = cursor.fetchall()
         conn.close()
-        
+
         if not rows:
              return jsonify({"error": "No inspection data found for this period"}), 404
-             
+
         # 2. Format Context
         context = f"Inspection Report Data ({start_date} to {end_date}):\n\n"
         for row in rows:
             status = "NG" if row['is_ng'] else "OK"
             context += f"- [{row['timestamp']}] Point: {row['point_name']} | Status: {status} | Details: {row['description'] or row['result']}\n"
-            
+
         # 3. Call AI Service
         if not user_prompt:
-             settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
-             # Use get() but fallback to DEFAULT_SETTINGS value explicitly if key missing in file
+             settings = settings_service.get_all()
              default_prompt = DEFAULT_SETTINGS.get('multiday_report_prompt', "Generate a concise summary report.")
              final_prompt = settings.get('multiday_report_prompt', default_prompt)
         else:
              final_prompt = user_prompt
 
         response = ai_service.generate_report(f"{final_prompt}\n\nContext:\n{context}")
-        
+
         # 4. Save to Database
-        report_id = save_generated_report(start_date, end_date, response['result'], response['usage'])
-        
+        report_id = save_generated_report(
+            start_date, end_date, response['result'], response['usage'],
+            robot_id=report_robot_id or ROBOT_ID
+        )
+
         return jsonify({
             "id": report_id,
             "report": response['result'],
@@ -600,12 +648,25 @@ def generate_multiday_report_pdf():
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
+    robot_id_filter = request.args.get('robot_id')
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens FROM patrol_runs ORDER BY id DESC')
+
+    if robot_id_filter:
+        cursor.execute(
+            'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
+            'FROM patrol_runs WHERE robot_id = ? ORDER BY id DESC',
+            (robot_id_filter,)
+        )
+    else:
+        cursor.execute(
+            'SELECT id, start_time, end_time, status, robot_serial, report_content, model_id, total_tokens, robot_id '
+            'FROM patrol_runs ORDER BY id DESC'
+        )
     rows = cursor.fetchall()
     conn.close()
-    
+
     result = []
     for row in rows:
         result.append(dict(row))
@@ -615,17 +676,17 @@ def get_history():
 def get_history_detail(run_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('SELECT * FROM patrol_runs WHERE id = ?', (run_id,))
     run = cursor.fetchone()
     if not run:
         conn.close()
         return jsonify({"error": "Run not found"}), 404
-        
+
     cursor.execute('SELECT * FROM inspection_results WHERE run_id = ?', (run_id,))
     inspections = cursor.fetchall()
     conn.close()
-    
+
     return jsonify({
         "run": dict(run),
         "inspections": [dict(i) for i in inspections]
@@ -643,7 +704,6 @@ def download_pdf_report(run_id):
         conn.close()
 
         if row and row['start_time']:
-            # Format: 2025-01-15 14:30:00 -> 2025-01-15_143000
             start_time_str = row['start_time'].replace(' ', '_').replace(':', '')
             filename = f'patrol_report_{run_id}_{start_time_str}.pdf'
         else:
@@ -664,10 +724,58 @@ def download_pdf_report(run_id):
 
 @app.route('/api/images/<path:filename>')
 def serve_image(filename):
-    return send_from_directory(IMAGES_DIR, filename)
+    # Try per-robot images dir first, then fallback to legacy
+    robot_path = os.path.join(ROBOT_IMAGES_DIR, filename)
+    if os.path.exists(robot_path):
+        return send_from_directory(ROBOT_IMAGES_DIR, filename)
+    # Fallback to legacy images dir
+    if os.path.exists(os.path.join(_LEGACY_IMAGES_DIR, filename)):
+        return send_from_directory(_LEGACY_IMAGES_DIR, filename)
+    return "Image not found", 404
+
+@app.route('/api/robots/<robot_id>/images/<path:filename>')
+def serve_robot_image(robot_id, filename):
+    """Serve images from any robot's directory."""
+    robot_images_dir = os.path.join(DATA_DIR, robot_id, "report", "images")
+    if os.path.exists(os.path.join(robot_images_dir, filename)):
+        return send_from_directory(robot_images_dir, filename)
+    # Fallback to legacy
+    if os.path.exists(os.path.join(_LEGACY_IMAGES_DIR, filename)):
+        return send_from_directory(_LEGACY_IMAGES_DIR, filename)
+    return "Image not found", 404
+
+
+# --- Heartbeat Thread ---
+
+def _heartbeat_loop():
+    """Update robot heartbeat every 30 seconds, reflecting actual Kachaka connection status."""
+    while True:
+        try:
+            is_connected = robot_service.get_client() is not None
+            update_robot_heartbeat(ROBOT_ID, is_connected)
+        except Exception as e:
+            logging.warning(f"Heartbeat error: {e}")
+        time.sleep(30)
+
 
 if __name__ == '__main__':
+    # Initialize DB and run migrations
     init_db()
-    # The RobotService starts automatically on import but we might want to explicity connect?
-    # It does auto-connect in polling loop.
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+    # Migrate legacy settings.json to DB
+    settings_service.migrate_from_json(_LEGACY_SETTINGS_FILE)
+
+    # Migrate legacy per-robot files
+    migrate_legacy_files()
+
+    # Register this robot
+    register_robot(ROBOT_ID, ROBOT_NAME, ROBOT_IP)
+
+    # Backfill robot_id on existing data
+    backfill_robot_id(ROBOT_ID)
+
+    # Start heartbeat thread
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+
+    app.run(host='0.0.0.0', port=5000, debug=False)

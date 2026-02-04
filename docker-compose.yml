@@ -1,9 +1,21 @@
 services:
-  app:
-    container_name: visual_patrol
-    build: .
+  nginx:
+    image: nginx:alpine
+    container_name: visual_patrol_nginx
     ports:
       - "5000:5000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./src/frontend:/app/frontend:ro
+    depends_on:
+      - robot-a
+      - robot-b
+      - robot-c
+    restart: unless-stopped
+
+  robot-a:
+    container_name: visual_patrol_robot_a
+    build: .
     volumes:
       - .:/app
       - ./data:/app/data
@@ -12,5 +24,42 @@ services:
       - DATA_DIR=/app/data
       - LOG_DIR=/app/logs
       - TZ=Asia/Taipei
+      - ROBOT_ID=robot-a
+      - ROBOT_NAME=Robot A
+      - ROBOT_IP=192.168.50.133:26400
+    user: "1000:1000"
+    restart: unless-stopped
+
+  robot-b:
+    container_name: visual_patrol_robot_b
+    build: .
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+      - TZ=Asia/Taipei
+      - ROBOT_ID=robot-b
+      - ROBOT_NAME=Robot B
+      - ROBOT_IP=192.168.50.133:26400
+    user: "1000:1000"
+    restart: unless-stopped
+
+  robot-c:
+    container_name: visual_patrol_robot_c
+    build: .
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+      - TZ=Asia/Taipei
+      - ROBOT_ID=robot-c
+      - ROBOT_NAME=Robot C
+      - ROBOT_IP=192.168.50.133:26400
     user: "1000:1000"
     restart: unless-stopped

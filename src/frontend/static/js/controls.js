@@ -13,7 +13,7 @@ export function initControls() {
 
 export async function moveRobot(x, y, theta) {
     try {
-        await fetch('/api/move', {
+        await fetch(`/api/${state.selectedRobotId}/move`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ x, y, theta })
@@ -25,7 +25,7 @@ export async function moveRobot(x, y, theta) {
 
 async function returnHome() {
     try {
-        await fetch('/api/return_home', { method: 'POST' });
+        await fetch(`/api/${state.selectedRobotId}/return_home`, { method: 'POST' });
     } catch (e) {
         console.error("Return Home Failed", e);
     }
@@ -33,7 +33,7 @@ async function returnHome() {
 
 async function cancelCommand() {
     try {
-        await fetch('/api/cancel_command', { method: 'POST' });
+        await fetch(`/api/${state.selectedRobotId}/cancel_command`, { method: 'POST' });
     } catch (e) {
         console.error("Cancel Command Failed", e);
     }
@@ -41,7 +41,7 @@ async function cancelCommand() {
 
 async function manualControl(action) {
     try {
-        await fetch('/api/manual_control', {
+        await fetch(`/api/${state.selectedRobotId}/manual_control`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action })

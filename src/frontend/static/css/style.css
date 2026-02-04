@@ -1597,3 +1597,118 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 #patrol-history-container .results-grid {
     padding: 12px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MULTI-ROBOT STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.robot-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 16px;
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.robot-dropdown {
+    padding: 4px 10px;
+    border: 1px solid var(--border-color, var(--border-subtle));
+    border-radius: 4px;
+    background: var(--panel-mid);
+    color: var(--text-primary);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 140px;
+}
+
+.connection-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    display: inline-block;
+}
+
+.connection-dot.connected {
+    background: var(--green-ok);
+}
+
+.connection-dot.disconnected {
+    background: var(--coral);
+}
+
+.robot-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 8px;
+    margin-left: 8px;
+    background: var(--teal-subtle);
+    color: var(--teal);
+    border: 1px solid var(--teal-dim);
+    vertical-align: middle;
+}
+
+/* Registered Robots Info (Settings) */
+.robots-info-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--void);
+    border: 1px solid var(--border-subtle);
+}
+
+.robot-info-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 8px;
+    background: var(--panel-mid);
+    border: 1px solid var(--border-subtle);
+    font-size: 12px;
+}
+
+.robot-info-name {
+    font-weight: 600;
+    color: var(--text-bright);
+    min-width: 80px;
+}
+
+.robot-info-id {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-size: 11px;
+    min-width: 80px;
+}
+
+.robot-info-ip {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    font-size: 11px;
+    flex: 1;
+}
+
+.robot-info-status {
+    font-family: var(--font-display);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+}
+
+.robot-info-status.online {
+    color: var(--mint);
+    background: rgba(40, 167, 69, 0.1);
+    border: 1px solid var(--mint);
+}
+
+.robot-info-status.offline {
+    color: var(--coral);
+    background: rgba(220, 53, 69, 0.1);
+    border: 1px solid var(--coral);
+}

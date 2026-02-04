@@ -1,6 +1,39 @@
-// stats.js — Token usage chart
+// stats.js — Token usage chart with robot filter
 
 let tokenChart = null;
+let statsRobotsCache = null;
+
+async function loadRobotsForStats() {
+    if (statsRobotsCache) return statsRobotsCache;
+    try {
+        const res = await fetch('/api/robots');
+        statsRobotsCache = await res.json();
+        return statsRobotsCache;
+    } catch (e) {
+        return [];
+    }
+}
+
+async function populateStatsRobotFilter() {
+    const select = document.getElementById('stats-robot-filter');
+    if (!select) return;
+
+    const robots = await loadRobotsForStats();
+    const currentVal = select.value;
+
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    robots.forEach(robot => {
+        const opt = document.createElement('option');
+        opt.value = robot.robot_id;
+        opt.textContent = robot.robot_name;
+        select.appendChild(opt);
+    });
+
+    if (currentVal) select.value = currentVal;
+}
 
 export function initStats() {
     const startInput = document.getElementById('stats-start-date');
@@ -12,11 +45,18 @@ export function initStats() {
     if (endInput) {
         endInput.addEventListener('change', loadStats);
     }
+
+    const robotFilter = document.getElementById('stats-robot-filter');
+    if (robotFilter) {
+        robotFilter.addEventListener('change', loadStats);
+    }
 }
 
 export async function loadStats() {
     const startInput = document.getElementById('stats-start-date');
     const endInput = document.getElementById('stats-end-date');
+
+    await populateStatsRobotFilter();
 
     if (!startInput.value) {
         const end = new Date();
@@ -35,7 +75,11 @@ export async function loadStats() {
     }
 
     try {
-        const res = await fetch('/api/stats/token_usage');
+        const robotFilter = document.getElementById('stats-robot-filter');
+        const robotId = robotFilter ? robotFilter.value : '';
+        const url = robotId ? `/api/stats/token_usage?robot_id=${encodeURIComponent(robotId)}` : '/api/stats/token_usage';
+
+        const res = await fetch(url);
         const data = await res.json();
 
         const startDate = new Date(startInput.value);

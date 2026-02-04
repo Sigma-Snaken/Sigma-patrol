@@ -20,7 +20,7 @@ async function startPatrol() {
     const resultsContainer = document.getElementById('results-container');
     if (resultsContainer) resultsContainer.innerHTML = '';
 
-    const res = await fetch('/api/patrol/start', { method: 'POST' });
+    const res = await fetch(`/api/${state.selectedRobotId}/patrol/start`, { method: 'POST' });
     if (!res.ok) {
         const err = await res.json();
         alert(err.error);
@@ -28,12 +28,13 @@ async function startPatrol() {
 }
 
 async function stopPatrol() {
-    await fetch('/api/patrol/stop', { method: 'POST' });
+    await fetch(`/api/${state.selectedRobotId}/patrol/stop`, { method: 'POST' });
 }
 
 function startPatrolPolling() {
     setInterval(async () => {
-        const res = await fetch('/api/patrol/status');
+        if (!state.selectedRobotId) return;
+        const res = await fetch(`/api/${state.selectedRobotId}/patrol/status`);
         const data = await res.json();
 
         if (data.is_patrolling) {
@@ -51,19 +52,23 @@ function startPatrolPolling() {
     }, 1000);
 }
 
+let lastStreamRobotId = null;
+
 function updateCameraStream(shouldStream) {
-    if (shouldStream === isStreamActive) return;
+    const robotChanged = lastStreamRobotId !== state.selectedRobotId;
+    if (shouldStream === isStreamActive && !robotChanged) return;
     isStreamActive = shouldStream;
+    lastStreamRobotId = state.selectedRobotId;
 
     const cams = [
-        document.querySelector('#front-camera-content img'),
-        document.querySelector('#robot-vision-content img')
+        document.getElementById('front-camera-img'),
+        document.getElementById('robot-vision-img')
     ];
 
     cams.forEach(img => {
         if (img) {
-            if (shouldStream) {
-                img.src = '/api/camera/front?t=' + new Date().getTime();
+            if (shouldStream && state.selectedRobotId) {
+                img.src = `/api/${state.selectedRobotId}/camera/front?t=` + new Date().getTime();
                 img.style.opacity = 1;
             } else {
                 img.src = '';
@@ -77,7 +82,8 @@ function updateCameraStream(shouldStream) {
 export async function loadResults() {
     const resultsContainer = document.getElementById('results-container');
 
-    const res = await fetch('/api/patrol/results');
+    if (!state.selectedRobotId) return;
+    const res = await fetch(`/api/${state.selectedRobotId}/patrol/results`);
     const results = await res.json();
 
     if (resultsContainer) {

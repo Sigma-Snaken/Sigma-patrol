@@ -1,5 +1,25 @@
 // history.js — History list, detail modal, report generation, PDF
+import state from './state.js';
 import { renderAIResultHTML } from './ai.js';
+
+let robotsCache = null;
+
+async function loadRobotsList() {
+    if (robotsCache) return robotsCache;
+    try {
+        const res = await fetch('/api/robots');
+        robotsCache = await res.json();
+        return robotsCache;
+    } catch (e) {
+        return [];
+    }
+}
+
+function getRobotName(robotId) {
+    if (!robotsCache) return robotId || '';
+    const robot = robotsCache.find(r => r.robot_id === robotId);
+    return robot ? robot.robot_name : (robotId || '');
+}
 
 export function initHistory() {
     const btnSavePdf = document.getElementById('btn-save-pdf');
@@ -39,6 +59,12 @@ export function initHistory() {
         }
     }
 
+    // Robot filter
+    const robotFilter = document.getElementById('history-robot-filter');
+    if (robotFilter) {
+        robotFilter.addEventListener('change', loadHistory);
+    }
+
     // Expose to window for inline onclick handlers
     window.viewHistoryDetail = viewHistoryDetail;
     window.closeHistoryModal = closeHistoryModal;
@@ -52,14 +78,45 @@ export function initHistory() {
     window.generatedReportData = null;
 }
 
+async function populateRobotFilter(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const robots = await loadRobotsList();
+
+    // Preserve current value
+    const currentVal = select.value;
+
+    // Clear all except first option (All Robots)
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    robots.forEach(robot => {
+        const opt = document.createElement('option');
+        opt.value = robot.robot_id;
+        opt.textContent = robot.robot_name;
+        select.appendChild(opt);
+    });
+
+    // Restore value if it still exists
+    if (currentVal) select.value = currentVal;
+}
+
 export async function loadHistory() {
     const listContainer = document.getElementById('history-list');
     if (!listContainer) return;
 
+    await populateRobotFilter('history-robot-filter');
+
     listContainer.innerHTML = '<div style="color:#666; text-align:center;">Loading history...</div>';
 
     try {
-        const res = await fetch('/api/history');
+        const robotFilter = document.getElementById('history-robot-filter');
+        const robotId = robotFilter ? robotFilter.value : '';
+        const url = robotId ? `/api/history?robot_id=${encodeURIComponent(robotId)}` : '/api/history';
+
+        const res = await fetch(url);
         const runs = await res.json();
 
         listContainer.innerHTML = '';
@@ -84,10 +141,12 @@ export async function loadHistory() {
             card.onclick = () => viewHistoryDetail(run.id);
 
             const statusColor = run.status === 'Completed' ? '#28a745' : (run.status === 'Running' ? '#007bff' : '#dc3545');
+            const robotName = getRobotName(run.robot_id);
+            const robotTag = robotName ? `<span class="robot-tag">${robotName}</span>` : '';
 
             card.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-weight:bold; font-size:1.1rem; color:#1a1a1a;">Patrol Run #${run.id}</span>
+                    <span style="font-weight:bold; font-size:1.1rem; color:#1a1a1a;">Patrol Run #${run.id} ${robotTag}</span>
                     <span style="font-size:0.8rem; background:${statusColor}; color:#fff; padding:2px 8px; border-radius:4px; font-weight:bold;">${run.status}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#555;">
@@ -128,6 +187,9 @@ async function viewHistoryDetail(runId) {
 
         window.currentReportData = { run, inspections };
 
+        // Determine image base URL based on robot_id
+        const imgBase = run.robot_id ? `/api/${run.robot_id}/images/` : '/api/images/';
+
         if (run.report_content) {
             contentDiv.innerHTML = marked.parse(run.report_content);
         } else {
@@ -149,7 +211,7 @@ async function viewHistoryDetail(runId) {
 
                 let imgHtml = '';
                 if (ins.image_path) {
-                    imgHtml = `<img src="/api/images/${ins.image_path}" style="width:120px; height:auto; border-radius:4px; border:1px solid #ccc;">`;
+                    imgHtml = `<img src="${imgBase}${ins.image_path}" style="width:120px; height:auto; border-radius:4px; border:1px solid #ccc;">`;
                 }
 
                 const resultHTML = renderAIResultHTML(ins.ai_response);

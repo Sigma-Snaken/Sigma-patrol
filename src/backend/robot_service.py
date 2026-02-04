@@ -1,8 +1,8 @@
 import threading
 import time
 import kachaka_api
-from config import ROBOT_IP, SETTINGS_FILE, DEFAULT_SETTINGS
-from utils import load_json
+from config import ROBOT_IP
+
 
 class RobotService:
     def __init__(self):
@@ -27,8 +27,7 @@ class RobotService:
         self.polling_thread.start()
 
     def connect(self):
-        settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
-        target_ip = settings.get("robot_ip", ROBOT_IP)
+        target_ip = ROBOT_IP
 
         try:
             new_client = kachaka_api.KachakaApiClient(target_ip)

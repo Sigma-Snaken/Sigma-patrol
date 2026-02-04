@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VISUAL PATROL // Command Center</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 </head>
@@ -16,7 +16,14 @@
              HEADER / COMMAND BAR
              ═══════════════════════════════════════════════════════════════════ -->
         <header class="glass-header">
-            <div class="logo">VISUAL PATROL</div>
+            <div class="logo">VISUAL PATROL
+                <div class="robot-selector">
+                    <select id="robot-select" class="robot-dropdown">
+                        <option value="">Loading...</option>
+                    </select>
+                    <span id="robot-connection-dot" class="connection-dot"></span>
+                </div>
+            </div>
 
             <div class="tabs">
                 <button class="tab-btn" onclick="switchTab('patrol')">Patrol</button>
@@ -100,7 +107,7 @@
                                 <h4>Front Camera <span id="front-camera-toggle" class="toggle-icon">▼</span></h4>
                             </div>
                             <div class="frame-content" id="front-camera-content">
-                                <img src="/api/camera/front" alt="Robot Camera Feed"
+                                <img id="front-camera-img" alt="Robot Camera Feed"
                                     style="width: 100%; display: block;" />
                             </div>
                         </div>
@@ -222,7 +229,7 @@
                                 <h4>Robot Vision <span id="robot-vision-toggle" class="toggle-icon">▼</span></h4>
                             </div>
                             <div class="frame-content" id="robot-vision-content">
-                                <img src="/api/camera/front" alt="Robot Camera Feed"
+                                <img id="robot-vision-img" alt="Robot Camera Feed"
                                     style="width: 100%; display: block;" />
                             </div>
                         </div>
@@ -278,6 +285,9 @@
                 <div class="header">
                     <h1>Patrol History</h1>
                     <div style="display: flex; gap: 12px; align-items: center;">
+                        <select id="history-robot-filter" style="width: auto; padding: 8px 12px;">
+                            <option value="">All Robots</option>
+                        </select>
                         <input type="date" id="history-start-date" title="Start Date">
                         <span style="color: var(--text-muted);">to</span>
                         <input type="date" id="history-end-date" title="End Date">
@@ -354,6 +364,9 @@
                 <div class="header">
                     <h1>Token Usage Statistics</h1>
                     <div style="display: flex; gap: 12px; align-items: center;">
+                        <select id="stats-robot-filter" style="width: auto; padding: 8px 12px;">
+                            <option value="">All Robots</option>
+                        </select>
                         <input type="date" id="stats-start-date">
                         <span style="color: var(--text-muted);">to</span>
                         <input type="date" id="stats-end-date">
@@ -404,8 +417,10 @@
                         <h3 class="settings-section-title">General Settings</h3>
 
                         <div class="form-group">
-                            <label>Robot IP Address</label>
-                            <input type="text" id="setting-robot-ip" placeholder="e.g. 192.168.50.133:26400">
+                            <label>Registered Robots</label>
+                            <div id="registered-robots-list" class="robots-info-container">
+                                <div style="color: var(--text-muted); font-size: 12px;">Loading...</div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Gemini API Key</label>
@@ -487,9 +502,9 @@
         </main>
     </div>
 
-    <script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
-    <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="/static/js/chart.min.js"></script>
+    <script src="/static/js/marked.min.js"></script>
+    <script type="module" src="/static/js/app.js"></script>
 </body>
 
 </html>

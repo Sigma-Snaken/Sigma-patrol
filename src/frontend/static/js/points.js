@@ -28,7 +28,7 @@ export function initPoints() {
     const btnExportPoints = document.getElementById('btn-export-points');
     if (btnExportPoints) {
         btnExportPoints.addEventListener('click', () => {
-            window.location.href = '/api/points/export';
+            window.location.href = `/api/${state.selectedRobotId}/points/export`;
         });
     }
 
@@ -47,7 +47,7 @@ export function initPoints() {
             formData.append('file', file);
 
             try {
-                const res = await fetch('/api/points/import', {
+                const res = await fetch(`/api/${state.selectedRobotId}/points/import`, {
                     method: 'POST',
                     body: formData
                 });
@@ -80,7 +80,8 @@ export function initPoints() {
 }
 
 export async function loadPoints() {
-    const res = await fetch('/api/points');
+    if (!state.selectedRobotId) return;
+    const res = await fetch(`/api/${state.selectedRobotId}/points`);
     state.currentPatrolPoints = await res.json();
     renderPointsTable();
 }
@@ -170,7 +171,7 @@ async function addCurrentPoint() {
         enabled: true
     };
 
-    await fetch('/api/points', {
+    await fetch(`/api/${state.selectedRobotId}/points`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(point)
@@ -179,7 +180,7 @@ async function addCurrentPoint() {
 }
 
 async function saveAllPoints() {
-    await fetch('/api/points/reorder', {
+    await fetch(`/api/${state.selectedRobotId}/points/reorder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state.currentPatrolPoints)
@@ -191,7 +192,7 @@ async function updatePoint(id, key, value) {
     if (!point) return;
     point[key] = value;
     try {
-        const res = await fetch('/api/points', {
+        const res = await fetch(`/api/${state.selectedRobotId}/points`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(point)
@@ -209,7 +210,7 @@ async function updatePoint(id, key, value) {
 
 async function deletePoint(id) {
     try {
-        const res = await fetch(`/api/points?id=${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/${state.selectedRobotId}/points?id=${id}`, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok || data.error) {
             alert('Failed to delete point: ' + (data.error || 'Unknown error'));
@@ -264,7 +265,7 @@ async function testPoint(id) {
     }
 
     try {
-        const moveRes = await fetch('/api/move', {
+        const moveRes = await fetch(`/api/${state.selectedRobotId}/move`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ x: point.x, y: point.y, theta: point.theta })
@@ -292,7 +293,7 @@ async function getLocationsFromRobot() {
     btn.innerHTML = '<span style="font-size: 12px;">⏳</span> Loading...';
 
     try {
-        const res = await fetch('/api/points/from_robot');
+        const res = await fetch(`/api/${state.selectedRobotId}/points/from_robot`);
         const data = await res.json();
 
         if (!res.ok) {

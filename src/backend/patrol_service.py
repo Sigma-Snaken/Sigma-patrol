@@ -11,7 +11,8 @@ import io
 from datetime import datetime
 from PIL import Image
 
-from config import SETTINGS_FILE, DEFAULT_SETTINGS, IMAGES_DIR, POINTS_FILE, DATA_DIR
+from config import ROBOT_ID, ROBOT_IMAGES_DIR, ROBOT_DATA_DIR, POINTS_FILE, SCHEDULE_FILE
+import settings_service
 import requests
 from utils import load_json, save_json, get_current_time_str, get_filename_timestamp
 from database import get_db_connection, db_context, update_run_tokens
@@ -22,8 +23,6 @@ from logger import get_logger
 from video_recorder import VideoRecorder
 
 logger = get_logger("patrol_service", "patrol_service.log")
-
-SCHEDULE_FILE = os.path.join(DATA_DIR, "patrol_schedule.json")
 
 
 class PatrolService:
@@ -103,7 +102,7 @@ class PatrolService:
 
         while True:
             try:
-                settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+                settings = settings_service.get_all()
                 tz_name = settings.get("timezone", "UTC")
 
                 try:
@@ -259,7 +258,7 @@ class PatrolService:
 
     def _save_inspection(self, run_id, point, point_name, prompt, parsed, image_path, move_status):
         """Save inspection result to database."""
-        rel_path = image_path.replace(IMAGES_DIR + "/", "").lstrip('/') if image_path else ""
+        rel_path = image_path.replace(ROBOT_IMAGES_DIR + "/", "").lstrip('/') if image_path else ""
 
         try:
             with db_context() as (conn, cursor):
@@ -267,13 +266,14 @@ class PatrolService:
                     INSERT INTO inspection_results
                     (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response,
                      is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens,
-                     total_tokens, image_path, timestamp, robot_moving_status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     total_tokens, image_path, timestamp, robot_moving_status, robot_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     run_id, point_name, point.get('x'), point.get('y'), prompt,
                     parsed['result_text'], 1 if parsed['is_ng'] else 0, parsed['description'],
                     parsed['usage_json'], parsed['prompt_tokens'], parsed['candidate_tokens'],
-                    parsed['total_tokens'], rel_path, get_current_time_str(), move_status
+                    parsed['total_tokens'], rel_path, get_current_time_str(), move_status,
+                    ROBOT_ID
                 ))
         except Exception as e:
             logger.error(f"DB Error saving inspection for {point_name}: {e}")
@@ -283,7 +283,7 @@ class PatrolService:
     def _patrol_logic(self):
         self._set_status("Starting...")
         points = load_json(POINTS_FILE, [])
-        settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+        settings = settings_service.get_all()
 
         # Validate AI config
         if not ai_service.is_configured():
@@ -306,8 +306,8 @@ class PatrolService:
         try:
             with db_context() as (conn, cursor):
                 cursor.execute(
-                    'INSERT INTO patrol_runs (start_time, status, robot_serial, model_id) VALUES (?, ?, ?, ?)',
-                    (get_current_time_str(), "Running", robot_service.get_serial(), model_name)
+                    'INSERT INTO patrol_runs (start_time, status, robot_serial, model_id, robot_id) VALUES (?, ?, ?, ?, ?)',
+                    (get_current_time_str(), "Running", robot_service.get_serial(), model_name, ROBOT_ID)
                 )
                 with self.state_lock:
                     self.current_run_id = cursor.lastrowid
@@ -322,14 +322,14 @@ class PatrolService:
 
         # Create run folder
         run_folder = f"{self.current_run_id}_{get_filename_timestamp()}"
-        run_images_dir = os.path.join(IMAGES_DIR, run_folder)
+        run_images_dir = os.path.join(ROBOT_IMAGES_DIR, run_folder)
         os.makedirs(run_images_dir, exist_ok=True)
         
         # Video recording setup
         recorder = None
         video_filename = None
         if settings.get("enable_video_recording", False):
-            video_dir = os.path.join(DATA_DIR, "report", "video")
+            video_dir = os.path.join(ROBOT_DATA_DIR, "report", "video")
             os.makedirs(video_dir, exist_ok=True)
             video_filename = os.path.join(video_dir, f"{self.current_run_id}_{get_filename_timestamp()}.mp4") # Use mp4 as tested
             

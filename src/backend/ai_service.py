@@ -9,8 +9,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from config import SETTINGS_FILE, DEFAULT_SETTINGS
-from utils import load_json
+import settings_service
 from logger import get_logger
 
 logger = get_logger("ai_service", "ai_service.log")
@@ -92,7 +91,7 @@ class AIService:
 
     def _configure(self):
         """Load settings and configure Gemini client."""
-        settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+        settings = settings_service.get_all()
         new_api_key = settings.get("gemini_api_key")
         new_model_name = settings.get("gemini_model", "gemini-2.0-flash")
 

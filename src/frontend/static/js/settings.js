@@ -1,4 +1,4 @@
-// settings.js — Settings load/save, clock
+// settings.js — Settings load/save, clock, registered robots display
 import state from './state.js';
 
 export function initSettings() {
@@ -47,8 +47,34 @@ export async function loadSettings() {
     const telegramUserId = document.getElementById('setting-telegram-user-id');
     if (telegramUserId) telegramUserId.value = data.telegram_user_id || '';
 
-    const ipInput = document.getElementById('setting-robot-ip');
-    if (ipInput) ipInput.value = data.robot_ip || '192.168.50.133:26400';
+    // Load registered robots list
+    loadRobotsList();
+}
+
+async function loadRobotsList() {
+    const container = document.getElementById('registered-robots-list');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/robots');
+        const robots = await res.json();
+
+        if (robots.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">No robots registered yet.</div>';
+            return;
+        }
+
+        container.innerHTML = robots.map(r => `
+            <div class="robot-info-row">
+                <span class="robot-info-name">${r.robot_name}</span>
+                <span class="robot-info-id">${r.robot_id}</span>
+                <span class="robot-info-ip">${r.robot_ip || '-'}</span>
+                <span class="robot-info-status ${r.status === 'online' ? 'online' : 'offline'}">${r.status}</span>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<div style="color: var(--coral); font-size: 12px;">Failed to load robots.</div>';
+    }
 }
 
 async function saveSettings() {
@@ -66,7 +92,6 @@ async function saveSettings() {
         enable_telegram: document.getElementById('setting-enable-telegram').checked,
         telegram_bot_token: document.getElementById('setting-telegram-bot-token').value,
         telegram_user_id: document.getElementById('setting-telegram-user-id').value,
-        robot_ip: document.getElementById('setting-robot-ip') ? document.getElementById('setting-robot-ip').value : '192.168.50.133:26400'
     };
     try {
         const res = await fetch('/api/settings', {
@@ -81,7 +106,7 @@ async function saveSettings() {
         }
         state.currentSettingsTimezone = settings.timezone;
         state.currentIdleStreamEnabled = settings.enable_idle_stream;
-        alert('Settings Saved! (Robot connection may reload)');
+        alert('Settings Saved!');
     } catch (e) {
         alert('Failed to save settings: ' + e.message);
     }

@@ -10,26 +10,11 @@ import shutil
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# Lazy import to avoid circular dependency
-_settings_cache = None
-_settings_mtime = 0
-
 
 def _get_settings():
-    """Get settings with simple file modification time caching."""
-    global _settings_cache, _settings_mtime
-    from config import SETTINGS_FILE, DEFAULT_SETTINGS
-
-    try:
-        current_mtime = os.path.getmtime(SETTINGS_FILE)
-        if _settings_cache is None or current_mtime > _settings_mtime:
-            _settings_cache = load_json(SETTINGS_FILE, DEFAULT_SETTINGS)
-            _settings_mtime = current_mtime
-    except OSError:
-        if _settings_cache is None:
-            _settings_cache = DEFAULT_SETTINGS
-
-    return _settings_cache
+    """Get settings from database via settings_service."""
+    import settings_service
+    return settings_service.get_all()
 
 
 def _get_timezone():

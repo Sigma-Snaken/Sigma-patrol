@@ -17,6 +17,10 @@ const state = {
 
     currentSettingsTimezone: 'UTC',
     currentIdleStreamEnabled: true,
+
+    // Multi-robot
+    selectedRobotId: null,
+    availableRobots: [],
 };
 
 export default state;

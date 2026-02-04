@@ -1,4 +1,5 @@
 // schedule.js — Schedule CRUD, render list, next-patrol display
+import state from './state.js';
 
 let scheduledPatrols = [];
 const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -13,9 +14,10 @@ export function initSchedule() {
     setInterval(updateNextPatrolDisplay, 60000);
 }
 
-async function loadSchedule() {
+export async function loadSchedule() {
+    if (!state.selectedRobotId) return;
     try {
-        const res = await fetch('/api/patrol/schedule');
+        const res = await fetch(`/api/${state.selectedRobotId}/patrol/schedule`);
         scheduledPatrols = await res.json();
         renderScheduleList();
     } catch (e) {
@@ -82,7 +84,7 @@ async function addSchedule() {
     }
 
     try {
-        const res = await fetch('/api/patrol/schedule', {
+        const res = await fetch(`/api/${state.selectedRobotId}/patrol/schedule`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -105,7 +107,7 @@ async function addSchedule() {
 
 async function toggleSchedule(id, enabled) {
     try {
-        await fetch(`/api/patrol/schedule/${id}`, {
+        await fetch(`/api/${state.selectedRobotId}/patrol/schedule/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
@@ -118,7 +120,7 @@ async function toggleSchedule(id, enabled) {
 
 async function deleteSchedule(id) {
     try {
-        await fetch(`/api/patrol/schedule/${id}`, {
+        await fetch(`/api/${state.selectedRobotId}/patrol/schedule/${id}`, {
             method: 'DELETE'
         });
         loadSchedule();
