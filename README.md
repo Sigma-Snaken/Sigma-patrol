@@ -1,108 +1,105 @@
-# Sigma Patrol
+# Visual Patrol
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.x-green)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
 ![Gemini](https://img.shields.io/badge/AI-Google%20Gemini-orange)
+![Platform](https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-lightgrey)
 
-An autonomous robot patrol system integrating **Kachaka Robot** with **Google Gemini Vision AI** for intelligent environment monitoring and anomaly detection.
+Autonomous robot patrol system integrating **Kachaka Robot** with **Google Gemini Vision AI** for intelligent environment monitoring and anomaly detection. Supports both x86 and ARM64 (NVIDIA Jetson) platforms.
 
 ## Features
 
 - **Autonomous Patrol** - Define waypoints and let the robot navigate automatically
 - **AI-Powered Inspection** - Gemini Vision analyzes images for anomalies (falls, intruders, hazards)
-- **Video Recording** - Record patrol footage with AI video analysis
+- **Video Recording** - Record patrol footage with codec auto-detection (H.264 / XVID / MJPEG)
 - **Real-time Dashboard** - Live map, robot position, battery, dual camera streams
 - **Scheduled Patrols** - Set recurring patrol times with day-of-week filtering
 - **Multi-day Analysis Reports** - Generate AI-powered analysis reports for any date range
-- **Unified PDF Reports** - Server-side PDF generation with full Markdown support (tables, lists, code blocks)
+- **PDF Reports** - Server-side PDF generation with Markdown and CJK support
 - **Manual Control** - Web-based remote control with D-pad navigation
 - **History & Analytics** - Browse past patrols with token usage statistics
-- **Chinese Language Support** - Full CJK font support in PDF reports
 
-## Quick Start (Docker)
+## Quick Start
 
 ```bash
-# Pull and run from GitHub Container Registry
-docker pull ghcr.io/sigma-snaken/sigma-patrol:latest
-docker run -d -p 5000:5000 -v sigma-data:/app/data ghcr.io/sigma-snaken/sigma-patrol:latest
+# Docker Compose (recommended)
+docker compose up -d
 
-# Or use docker-compose
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
+# Or pull from GitHub Container Registry
+docker pull ghcr.io/sigma-snaken/visual-patrol:latest
+docker run -d -p 5000:5000 -v vp-data:/app/data ghcr.io/sigma-snaken/visual-patrol:latest
 ```
 
-Access the web interface at [http://localhost:5000](http://localhost:5000)
+Open [http://localhost:5000](http://localhost:5000), then go to **Settings** to configure:
 
-### Initial Setup
+1. **Google Gemini API Key**
+2. **Robot IP** (default: `192.168.50.133:26400`)
+3. **Timezone**
 
-1. Go to **Settings** tab
-2. Enter your **Google Gemini API Key**
-3. Configure **Robot IP** (default: `192.168.50.133:26400`)
-4. Set your **Timezone**
-5. Click **Save Settings**
+## Architecture
 
-## Screenshots
-
-| Patrol Dashboard | History & Reports |
-|------------------|-------------------|
-| Live map with robot position, camera feeds, and patrol status | Browse past patrols and generate multi-day analysis reports |
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Browser   │────>│  Flask API  │────>│   Kachaka   │
+│  Dashboard  │<────│  (app.py)   │<────│   Robot     │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                           │
+               ┌───────────┼───────────┐
+               v           v           v
+       ┌──────────┐ ┌──────────┐ ┌──────────┐
+       │  Patrol  │ │    AI    │ │   PDF    │
+       │ Service  │ │ Service  │ │ Service  │
+       └────┬─────┘ └────┬─────┘ └──────────┘
+            │            │
+            v            v
+       ┌──────────┐ ┌──────────┐
+       │  SQLite  │ │  Gemini  │
+       │    DB    │ │   API    │
+       └──────────┘ └──────────┘
+```
 
 ## Project Structure
 
 ```
-Sigma-patrol/
+visual-patrol/
 ├── src/
-│   ├── backend/                 # Python Flask backend
+│   ├── backend/
 │   │   ├── app.py              # REST API server
 │   │   ├── patrol_service.py   # Patrol orchestration
 │   │   ├── robot_service.py    # Kachaka robot interface
 │   │   ├── ai_service.py       # Gemini AI integration
-│   │   ├── pdf_service.py      # PDF report generation (ReportLab)
+│   │   ├── video_recorder.py   # Video recording with codec fallback
+│   │   ├── pdf_service.py      # PDF report generation
 │   │   ├── database.py         # SQLite management
-│   │   ├── config.py           # Configuration & defaults
-│   │   ├── utils.py            # Utilities (JSON, time, etc.)
+│   │   ├── config.py           # Configuration
+│   │   ├── utils.py            # Utilities
 │   │   ├── logger.py           # Timezone-aware logging
-│   │   └── requirements.txt    # Python dependencies
-│   │
-│   └── frontend/               # Web UI
+│   │   └── requirements.txt
+│   └── frontend/
 │       ├── templates/
-│       │   └── index.html      # Single-page app
+│       │   └── index.html
 │       └── static/
-│           ├── css/style.css   # Light mode cream/beige theme
-│           └── js/main.js      # UI logic
-│
+│           ├── css/style.css
+│           └── js/main.js
 ├── data/                       # Runtime data (Docker volume)
-│   ├── config/
-│   │   ├── points.json         # Patrol waypoints
-│   │   └── settings.json       # System settings
-│   ├── patrol_schedule.json    # Scheduled patrols
-│   └── report/
-│       ├── report.db           # SQLite database
-│       └── images/             # Captured patrol images
-│
 ├── logs/                       # Application logs
-├── tools/                      # Debug & inspection utilities
+├── tools/                      # Debug utilities
 ├── tests/                      # Unit tests
+├── deploy/                     # Production compose file
 ├── Dockerfile
 ├── docker-compose.yml
-└── .github/workflows/          # CI/CD pipelines
-    └── docker-publish.yaml     # Auto-build Docker images
+└── .github/workflows/          # CI/CD (multi-arch build)
 ```
 
 ## Local Development
 
 ```bash
-# Install dependencies
 pip install -r src/backend/requirements.txt
 
-# Set environment variables
 export DATA_DIR=$(pwd)/data
 export LOG_DIR=$(pwd)/logs
 
-# Run the server
 python src/backend/app.py
 ```
 
@@ -145,14 +142,10 @@ python src/backend/app.py
 |----------|--------|-------------|
 | `/api/history` | GET | List all patrol runs |
 | `/api/history/<run_id>` | GET | Patrol run details |
-| `/api/report/<run_id>/pdf` | GET | Download single patrol PDF report |
+| `/api/report/<run_id>/pdf` | GET | Download single patrol PDF |
 | `/api/reports/generate` | POST | Generate multi-day analysis report |
 | `/api/reports/generate/pdf` | GET | Download multi-day analysis PDF |
 | `/api/stats/token_usage` | GET | Token usage by date |
-
-### AI Testing
-| Endpoint | Method | Description |
-|----------|--------|-------------|
 | `/api/test_ai` | POST | Test AI on current camera frame |
 
 ## Configuration
@@ -180,90 +173,35 @@ python src/backend/app.py
     {
         "id": "unique-id",
         "name": "Entrance",
-        "x": 1.5,
-        "y": 2.0,
-        "theta": 0.0,
+        "x": 1.5, "y": 2.0, "theta": 0.0,
         "prompt": "Check for obstructions",
         "enabled": true
     }
 ]
 ```
 
-## Architecture
+## Deployment
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Browser   │────▶│  Flask API  │────▶│   Kachaka   │
-│  (main.js)  │◀────│  (app.py)   │◀────│   Robot     │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                          │
-              ┌───────────┼───────────┐
-              ▼           ▼           ▼
-      ┌──────────┐ ┌──────────┐ ┌──────────┐
-      │  Patrol  │ │    AI    │ │   PDF    │
-      │ Service  │ │ Service  │ │ Service  │
-      └────┬─────┘ └────┬─────┘ └──────────┘
-           │            │
-           ▼            ▼
-      ┌──────────┐ ┌──────────┐
-      │  SQLite  │ │  Gemini  │
-      │    DB    │ │   API    │
-      └──────────┘ └──────────┘
+Docker images are automatically built for **linux/amd64** and **linux/arm64** on every push to `main`.
+
+```bash
+# Production deployment
+docker compose -f deploy/docker-compose.prod.yaml up -d
+
+# Or pull manually
+docker pull ghcr.io/sigma-snaken/visual-patrol:latest
 ```
 
-## Key Features Explained
-
-### Turbo Mode
-Enable **Turbo Mode** in settings to queue AI inspections asynchronously. This allows the robot to continue moving while images are being analyzed, reducing total patrol time.
-
-### Video Recording
-When enabled, the system records video during patrols for later AI analysis. Configure the video analysis prompt in settings to customize what the AI looks for in recorded footage.
-
-### Multi-day Analysis Reports
-Generate comprehensive reports spanning any date range:
-1. Go to **History** tab
-2. Select start and end dates
-3. Click **Generate Report**
-4. Download as PDF with full Markdown formatting
-
-### PDF Report Features
-- Professional layout with consistent styling
-- Full Markdown support (headers, tables, lists, code blocks, blockquotes)
-- Chinese/CJK character support (STSong-Light font)
-- Embedded inspection images
-- Page numbers and footers
-- Server-side generation (no browser dependency)
+See [deploy/README.md](deploy/README.md) for more details.
 
 ## Troubleshooting
 
-**Robot Disconnected**
-- Verify robot IP in settings
-- Ensure same network as robot
-- Check if Kachaka API port (26400) is accessible
-
-**AI Analysis Failed**
-- Verify Gemini API key is valid
-- Check `logs/ai_service.log` for errors
-- Ensure sufficient API quota
-
-**PDF Generation Failed**
-- Check `logs/app.log` for errors
-- Verify images exist in `data/report/images/`
-- For Chinese text issues, ensure CJK fonts are available
-
-**Camera Stream Not Loading**
-- Check if `enable_idle_stream` is enabled in settings
-- Verify robot camera is accessible
-- Try refreshing the page
-
-## CI/CD
-
-Docker images are automatically built and pushed to GitHub Container Registry on every push to `main`:
-
-```bash
-# Pull the latest image
-docker pull ghcr.io/sigma-snaken/sigma-patrol:latest
-```
+| Problem | Solution |
+|---------|----------|
+| Robot disconnected | Verify robot IP in settings; ensure same network; check port 26400 |
+| AI analysis failed | Verify Gemini API key; check `logs/ai_service.log`; ensure API quota |
+| PDF generation failed | Check `logs/app.log`; verify images in `data/report/images/` |
+| Camera stream not loading | Enable `enable_idle_stream` in settings; refresh page |
 
 ## License
 

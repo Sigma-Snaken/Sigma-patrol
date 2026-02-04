@@ -1,7 +1,7 @@
 services:
-  sigma-patrol:
-    container_name: sigma-patrol
-    image: ghcr.io/sigma-snaken/sigma-patrol:latest
+  visual-patrol:
+    container_name: visual-patrol
+    image: ghcr.io/sigma-snaken/visual-patrol:latest
     ports:
       - "5000:5000"
     volumes:
@@ -20,5 +20,5 @@ services:
       start_period: 40s
 
 volumes:
-  sigma-patrol-data:
-  sigma-patrol-logs:
+  visual-patrol-data:
+  visual-patrol-logs:

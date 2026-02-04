@@ -1,5 +1,5 @@
 {
-    "name": "Sigma Single Robot Patrol with Gemini",
+    "name": "Visual Patrol with Gemini",
     "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/app",

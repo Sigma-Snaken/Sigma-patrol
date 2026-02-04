@@ -1,6 +1,6 @@
 services:
   app:
-    container_name: sigma_patrol_gemini
+    container_name: visual_patrol
     build: .
     ports:
       - "5000:5000"

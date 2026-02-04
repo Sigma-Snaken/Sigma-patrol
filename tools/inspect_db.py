@@ -4,7 +4,7 @@ import sys
 
 # Adjust path based on config.py we saw earlier
 # method 1: hardcoded path based on what we saw
-db_path = "/home/snaken/Sigma-patrol/data/report/report.db"
+db_path = "/home/snaken/visual-patrol/data/report/report.db"
 
 if not os.path.exists(db_path):
     print(f"Database not found at: {db_path}")

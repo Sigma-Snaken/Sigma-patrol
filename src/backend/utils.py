@@ -1,5 +1,5 @@
 """
-Utility functions for Sigma Patrol system.
+Utility functions for Visual Patrol system.
 Includes JSON I/O and timezone-aware time utilities.
 """
 

@@ -513,7 +513,7 @@ def generate_analysis_report(content, start_date, end_date):
 
     # === Title Page ===
     story.append(Spacer(1, 30*mm))
-    story.append(Paragraph("SIGMA PATROL", styles['ReportTitle']))
+    story.append(Paragraph("VISUAL PATROL", styles['ReportTitle']))
     story.append(Paragraph("Analysis Report", styles['ReportTitle']))
     story.append(Spacer(1, 10*mm))
     story.append(Paragraph(
@@ -542,7 +542,7 @@ def generate_analysis_report(content, start_date, end_date):
         canvas.setFont(CJK_FONT, 8)
         canvas.setFillColor(MUTED_TEXT)
         canvas.drawCentredString(A4[0] / 2, 15*mm, f"Page {page_num}")
-        canvas.drawCentredString(A4[0] / 2, 10*mm, f"SIGMA PATROL System - Analysis Report ({start_date} to {end_date})")
+        canvas.drawCentredString(A4[0] / 2, 10*mm, f"VISUAL PATROL System - Analysis Report ({start_date} to {end_date})")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
@@ -586,7 +586,7 @@ def generate_patrol_report(run_id):
 
     # === Title Page ===
     story.append(Spacer(1, 30*mm))
-    story.append(Paragraph("SIGMA PATROL REPORT", styles['ReportTitle']))
+    story.append(Paragraph("VISUAL PATROL REPORT", styles['ReportTitle']))
     story.append(Spacer(1, 10*mm))
     story.append(Paragraph(f"Report #{run_id}", styles['CJKNormal']))
     story.append(Paragraph(
@@ -713,7 +713,7 @@ def generate_patrol_report(run_id):
         canvas.setFont(CJK_FONT, 8)
         canvas.setFillColor(MUTED_TEXT)
         canvas.drawCentredString(A4[0] / 2, 15*mm, f"Page {page_num}")
-        canvas.drawCentredString(A4[0] / 2, 10*mm, f"SIGMA PATROL System - Report #{run_id}")
+        canvas.drawCentredString(A4[0] / 2, 10*mm, f"VISUAL PATROL System - Report #{run_id}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)

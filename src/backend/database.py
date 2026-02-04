@@ -1,5 +1,5 @@
 """
-Database management for Sigma Patrol system.
+Database management for Visual Patrol system.
 SQLite with automatic schema migrations.
 """
 

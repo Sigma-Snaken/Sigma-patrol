@@ -29,7 +29,7 @@ The image is automatically built and pushed to GitHub Container Registry on ever
 
 **Pull manually:**
 ```bash
-docker pull ghcr.io/sigma-snaken/sigma-patrol:latest
+docker pull ghcr.io/sigma-snaken/visual-patrol:latest
 ```
 
 **Available tags:**

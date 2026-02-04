@@ -2,7 +2,7 @@ import sqlite3
 import os
 import json
 
-db_path = "/home/snaken/Sigma-patrol/data/report/report.db"
+db_path = "/home/snaken/visual-patrol/data/report/report.db"
 
 if not os.path.exists(db_path):
     print(f"Database not found at: {db_path}")
