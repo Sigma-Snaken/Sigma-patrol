@@ -1,5 +1,5 @@
 flask>=3.0,<4.0
-kachaka-api>=1.0,<2.0
+kachaka-api>=3.14,<4.0
 numpy>=2.2,<3.0
 pillow>=10.0,<11.0
 google-genai>=1.0,<2.0
