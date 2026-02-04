@@ -25,18 +25,27 @@ class VideoRecorder:
             return
         
         try:
-            # Use H.264 (avc1) for best compatibility with browsers and IDEs.
-            # Requires ffmpeg to be installed in the container.
+            # Try codecs in order of preference.
+            # H.264 (avc1) is best for browser/IDE compatibility but may
+            # not be available on all platforms (e.g. ARM without hw encoder).
             if self.output_path.endswith('.mp4'):
-                fourcc = cv2.VideoWriter_fourcc(*'avc1')
+                codecs = [('avc1', 'H.264'), ('XVID', 'XVID'), ('MJPG', 'MJPEG')]
             else:
-                fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-                
-            self.writer = cv2.VideoWriter(
-                self.output_path, fourcc, self.fps, (self.width, self.height)
-            )
-            
-            if not self.writer.isOpened():
+                codecs = [('MJPG', 'MJPEG')]
+
+            for codec_tag, codec_name in codecs:
+                fourcc = cv2.VideoWriter_fourcc(*codec_tag)
+                self.writer = cv2.VideoWriter(
+                    self.output_path, fourcc, self.fps, (self.width, self.height)
+                )
+                if self.writer.isOpened():
+                    logger.info(f"Using {codec_name} codec for {self.output_path}")
+                    break
+                self.writer.release()
+                logger.warning(f"{codec_name} codec unavailable, trying next...")
+                self.writer = None
+
+            if self.writer is None or not self.writer.isOpened():
                 logger.error(f"Failed to open video writer for {self.output_path}")
                 return
 
