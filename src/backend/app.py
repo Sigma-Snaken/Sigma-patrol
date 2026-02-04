@@ -778,4 +778,5 @@ if __name__ == '__main__':
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     heartbeat_thread.start()
 
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.getenv('PORT', '5000'))
+    app.run(host='0.0.0.0', port=port, debug=False)
