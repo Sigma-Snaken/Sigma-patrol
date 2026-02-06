@@ -68,7 +68,8 @@ class LiveMonitor:
         self.cooldown_seconds = 60
         self._lock = threading.Lock()
 
-    def start(self, run_id, alert_rules, vila_alert_url, frame_func, check_interval=5.0, system_prompt=""):
+    def start(self, run_id, alert_rules, vila_alert_url, frame_func, check_interval=5.0,
+              system_prompt="", telegram_config=None):
         """Start background monitoring.
 
         Args:
@@ -78,6 +79,7 @@ class LiveMonitor:
             frame_func: Callable returning camera image (gRPC response with .data).
             check_interval: Seconds between checks.
             system_prompt: Prompt appended to each rule question.
+            telegram_config: Optional dict with keys: bot_token, user_id. If provided, alerts are sent to Telegram.
         """
         if self.is_monitoring:
             return
@@ -88,6 +90,7 @@ class LiveMonitor:
         self.frame_func = frame_func
         self.check_interval = check_interval
         self.system_prompt = system_prompt
+        self.telegram_config = telegram_config
         self.alerts = []
         self.alert_cooldowns = {}
 
@@ -205,6 +208,30 @@ class LiveMonitor:
                 self.alerts.append(alert_entry)
 
             logger.warning(f"ALERT triggered: rule='{rule}' response='{response_text.strip()}'")
+
+            # Send to Telegram
+            if self.telegram_config and img_path:
+                self._send_telegram_alert(rule, timestamp, jpeg_bytes)
+
+    def _send_telegram_alert(self, rule, timestamp, jpeg_bytes):
+        """Send alert photo + caption to Telegram."""
+        bot_token = self.telegram_config.get("bot_token")
+        user_id = self.telegram_config.get("user_id")
+        if not bot_token or not user_id:
+            return
+
+        try:
+            caption = f"⚠️ Live Monitor Alert\n\nRule: {rule}\nRobot: {ROBOT_ID}\nTime: {timestamp}"
+            url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+            files = {"photo": (f"alert_{int(time.time())}.jpg", jpeg_bytes, "image/jpeg")}
+            data = {"chat_id": user_id, "caption": caption}
+            resp = requests.post(url, data=data, files=files, timeout=10)
+            if resp.ok:
+                logger.info(f"Telegram alert sent for rule: {rule}")
+            else:
+                logger.error(f"Telegram alert error: {resp.text}")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram alert: {e}")
 
 
 live_monitor = LiveMonitor()

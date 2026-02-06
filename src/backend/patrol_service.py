@@ -350,6 +350,12 @@ class PatrolService:
         if settings.get("enable_live_monitor") and settings.get("vila_alert_url"):
             rules = settings.get("live_monitor_rules", [])
             if rules:
+                tg_config = None
+                if settings.get("enable_telegram"):
+                    tg_token = settings.get("telegram_bot_token", "")
+                    tg_user = settings.get("telegram_user_id", "")
+                    if tg_token and tg_user:
+                        tg_config = {"bot_token": tg_token, "user_id": tg_user}
                 live_monitor.start(
                     self.current_run_id,
                     rules,
@@ -357,6 +363,7 @@ class PatrolService:
                     robot_service.get_front_camera_image,
                     settings.get("live_monitor_interval", 5),
                     system_prompt=settings.get("vila_system_prompt", ""),
+                    telegram_config=tg_config,
                 )
                 live_monitor_active = True
 
