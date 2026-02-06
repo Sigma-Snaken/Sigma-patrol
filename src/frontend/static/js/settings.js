@@ -47,6 +47,9 @@ export async function loadSettings() {
     const telegramUserId = document.getElementById('setting-telegram-user-id');
     if (telegramUserId) telegramUserId.value = data.telegram_user_id || '';
 
+    const telegramMessagePrompt = document.getElementById('setting-telegram-message-prompt');
+    if (telegramMessagePrompt) telegramMessagePrompt.value = data.telegram_message_prompt || '';
+
     // Load registered robots list
     loadRobotsList();
 }
@@ -96,6 +99,7 @@ async function saveSettings() {
         enable_telegram: document.getElementById('setting-enable-telegram').checked,
         telegram_bot_token: document.getElementById('setting-telegram-bot-token').value,
         telegram_user_id: document.getElementById('setting-telegram-user-id').value,
+        telegram_message_prompt: document.getElementById('setting-telegram-message-prompt')?.value || '',
     };
     try {
         const res = await fetch('/api/settings', {

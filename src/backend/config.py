@@ -62,7 +62,8 @@ DEFAULT_SETTINGS = {
 2.  **備註/異常說明 (Notes)：** 詳細說明任何標記為「X」的項目，或需要注意的事項。
 
 **請以一個完整的 Markdown 表格呈現最終的巡檢報告。**""",
-    "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies."
+    "multiday_report_prompt": "Generate a comprehensive summary report for the selected period, highlighting trends and anomalies.",
+    "telegram_message_prompt": "Based on the patrol inspection results below, generate a concise Telegram notification message in Traditional Chinese. Summarize the overall status, highlight any anomalies (marked X), and keep it under 500 characters. Use emoji sparingly for readability."
 }
 
 

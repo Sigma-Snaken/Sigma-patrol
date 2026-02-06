@@ -541,12 +541,36 @@ class PatrolService:
 
             # --- Telegram Notification ---
             if settings.get('enable_telegram', False):
-                self._send_telegram_notification(settings, parsed['result_text'])
+                telegram_message = self._generate_telegram_message(
+                    inspections_data, settings, video_analysis_text
+                )
+                self._send_telegram_notification(settings, telegram_message)
 
         except Exception as e:
             logger.error(f"Report Generation Error: {e}")
 
-    def _send_telegram_notification(self, settings, report_text):
+    def _generate_telegram_message(self, inspections_data, settings, video_analysis_text=None):
+        """Generate a concise Telegram message using AI."""
+        try:
+            custom_prompt = settings.get('telegram_message_prompt', '').strip()
+            if not custom_prompt:
+                custom_prompt = "Generate a concise Telegram notification summarizing this patrol."
+
+            prompt = f"{custom_prompt}\n\n"
+            for item in inspections_data:
+                prompt += f"- Point: {item['point']}\n  Result: {item['result']}\n\n"
+
+            if video_analysis_text:
+                prompt += f"\nVideo Analysis Summary:\n{video_analysis_text}\n\n"
+
+            response_obj = ai_service.generate_report(prompt)
+            parsed = parse_ai_response(response_obj)
+            return parsed['result_text']
+        except Exception as e:
+            logger.error(f"Telegram message generation failed: {e}")
+            return "Patrol completed. Failed to generate summary."
+
+    def _send_telegram_notification(self, settings, message):
         """Send patrol report and PDF to Telegram."""
         bot_token = settings.get('telegram_bot_token')
         user_id = settings.get('telegram_user_id')
@@ -562,7 +586,7 @@ class PatrolService:
             text_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             text_payload = {
                 "chat_id": user_id,
-                "text": f"🤖 *Patrol Completed*\n\n{report_text[:1000]}...", # Truncate if too long
+                "text": message,
                 "parse_mode": "Markdown"
             }
             resp = requests.post(text_url, json=text_payload, timeout=10)

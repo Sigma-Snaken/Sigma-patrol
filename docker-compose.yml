@@ -9,8 +9,6 @@ services:
       - ./src/frontend:/app/frontend:ro
     depends_on:
       - robot-a
-      - robot-b
-      - robot-c
     restart: unless-stopped
 
   robot-a:
@@ -29,34 +27,34 @@ services:
       - ROBOT_IP=192.168.50.133:26400
     restart: unless-stopped
 
-  robot-b:
-    container_name: visual_patrol_robot_b
-    build: .
-    volumes:
-      - ./src:/app/src
-      - ./data:/app/data
-      - ./logs:/app/logs
-    environment:
-      - DATA_DIR=/app/data
-      - LOG_DIR=/app/logs
-      - TZ=Asia/Taipei
-      - ROBOT_ID=robot-b
-      - ROBOT_NAME=Robot B
-      - ROBOT_IP=192.168.50.133:26400
-    restart: unless-stopped
+  # robot-b:
+  #   container_name: visual_patrol_robot_b
+  #   build: .
+  #   volumes:
+  #     - ./src:/app/src
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - DATA_DIR=/app/data
+  #     - LOG_DIR=/app/logs
+  #     - TZ=Asia/Taipei
+  #     - ROBOT_ID=robot-b
+  #     - ROBOT_NAME=Robot B
+  #     - ROBOT_IP=192.168.50.133:26400
+  #   restart: unless-stopped
 
-  robot-c:
-    container_name: visual_patrol_robot_c
-    build: .
-    volumes:
-      - ./src:/app/src
-      - ./data:/app/data
-      - ./logs:/app/logs
-    environment:
-      - DATA_DIR=/app/data
-      - LOG_DIR=/app/logs
-      - TZ=Asia/Taipei
-      - ROBOT_ID=robot-c
-      - ROBOT_NAME=Robot C
-      - ROBOT_IP=192.168.50.133:26400
-    restart: unless-stopped
+  # robot-c:
+  #   container_name: visual_patrol_robot_c
+  #   build: .
+  #   volumes:
+  #     - ./src:/app/src
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - DATA_DIR=/app/data
+  #     - LOG_DIR=/app/logs
+  #     - TZ=Asia/Taipei
+  #     - ROBOT_ID=robot-c
+  #     - ROBOT_NAME=Robot C
+  #     - ROBOT_IP=192.168.50.133:26400
+  #   restart: unless-stopped

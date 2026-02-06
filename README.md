@@ -244,6 +244,17 @@ python src/backend/app.py
 | Camera stream not loading | Enable "Continuous Camera Stream" in Settings; check robot connection |
 | Map not loading | Robot may still be connecting; check container logs for gRPC errors |
 
+## Documentation
+
+Detailed documentation is available in the [`docs/`](docs/) directory:
+
+- [Architecture Overview](docs/architecture.md) -- System design, request flow, threading model, networking
+- [API Reference](docs/api-reference.md) -- All REST endpoints with request/response examples
+- [Frontend Guide](docs/frontend.md) -- Module structure, state management, UI patterns
+- [Backend Guide](docs/backend.md) -- Services, database schema, startup sequence
+- [Deployment Guide](docs/deployment.md) -- Dev and production setup, Docker, adding robots
+- [Configuration](docs/configuration.md) -- Environment variables, settings, per-robot config files
+
 ## License
 
 Copyright (c) 2026 Sigma Robotics. All rights reserved.
