@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender-dev \
     ffmpeg \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for faster dependency resolution
@@ -49,10 +50,14 @@ RUN groupadd -g 1000 appuser && \
     useradd -u 1000 -g 1000 -r -s /bin/false appuser && \
     mkdir -p /app/data /app/logs && \
     chown -R appuser:appuser /app/data /app/logs
-USER appuser
+
+# Copy entrypoint script (fixes volume permissions then drops to appuser)
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Expose the Flask port
 EXPOSE 5000
 
-# Command to run the application
+# Start as root; entrypoint fixes volume ownership then drops to appuser
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "app.py"]
