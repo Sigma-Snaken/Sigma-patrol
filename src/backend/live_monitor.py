@@ -62,7 +62,6 @@ class LiveMonitor:
         self.monitor_thread = None
         self.check_interval = 5.0
         self.alert_rules = []
-        self.paused = False
         self.current_run_id = None
         self.alerts = []
         self.alert_cooldowns = {}  # {rule: last_trigger_timestamp}
@@ -89,7 +88,6 @@ class LiveMonitor:
         self.frame_func = frame_func
         self.check_interval = check_interval
         self.system_prompt = system_prompt
-        self.paused = False
         self.alerts = []
         self.alert_cooldowns = {}
 
@@ -108,14 +106,6 @@ class LiveMonitor:
             self.monitor_thread = None
         logger.info(f"LiveMonitor stopped. Total alerts: {len(self.alerts)}")
 
-    def pause(self):
-        """Pause monitoring (during inspect_point)."""
-        self.paused = True
-
-    def resume(self):
-        """Resume monitoring (after inspect_point)."""
-        self.paused = False
-
     def get_alerts(self):
         """Return list of alerts collected during this run."""
         with self._lock:
@@ -130,11 +120,10 @@ class LiveMonitor:
         while self.is_monitoring:
             start_time = time.time()
 
-            if not self.paused:
-                try:
-                    self._check_once(evidence_dir)
-                except Exception as e:
-                    logger.error(f"LiveMonitor check error: {e}")
+            try:
+                self._check_once(evidence_dir)
+            except Exception as e:
+                logger.error(f"LiveMonitor check error: {e}")
 
             elapsed = time.time() - start_time
             sleep_time = max(0, self.check_interval - elapsed)

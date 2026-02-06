@@ -396,16 +396,10 @@ class PatrolService:
                 self._set_status(f"Inspecting {point_name}...")
                 time.sleep(2)
 
-                if live_monitor_active:
-                    live_monitor.pause()
-
                 self._inspect_point(
                     point, point_name, run_images_dir, settings,
                     turbo_mode, inspections_data
                 )
-
-                if live_monitor_active:
-                    live_monitor.resume()
         finally:
             # Ensure live monitor is always stopped
             if live_monitor_active:
