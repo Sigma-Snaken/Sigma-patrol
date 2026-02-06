@@ -19,7 +19,6 @@ export async function loadSettings() {
     document.getElementById('setting-vila-server-url').value = data.vila_server_url || 'http://localhost:9000';
     document.getElementById('setting-vila-model').value = data.vila_model || 'VILA1.5-3B';
     document.getElementById('setting-vila-alert-url').value = data.vila_alert_url || '';
-    document.getElementById('setting-vila-system-prompt').value = data.vila_system_prompt || 'Answer only yes or no.';
     const tz = data.timezone || 'UTC';
     document.getElementById('setting-timezone').value = tz;
     state.currentSettingsTimezone = tz;
@@ -109,7 +108,6 @@ async function saveSettings() {
         vila_server_url: document.getElementById('setting-vila-server-url')?.value || '',
         vila_model: document.getElementById('setting-vila-model')?.value || '',
         vila_alert_url: document.getElementById('setting-vila-alert-url')?.value || '',
-        vila_system_prompt: document.getElementById('setting-vila-system-prompt')?.value || '',
         gemini_api_key: apiKeyVal,
         gemini_model: document.getElementById('setting-model').value,
         timezone: document.getElementById('setting-timezone').value,
@@ -171,7 +169,6 @@ export async function testLiveMonitor() {
     const vilaAlertUrl = document.getElementById('setting-vila-alert-url')?.value || '';
     const rulesText = document.getElementById('setting-live-monitor-rules')?.value || '';
     const interval = parseInt(document.getElementById('setting-live-monitor-interval')?.value || '5', 10);
-    const systemPrompt = document.getElementById('setting-vila-system-prompt')?.value || '';
     const rules = rulesText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
 
     if (!vilaAlertUrl) {
@@ -192,7 +189,7 @@ export async function testLiveMonitor() {
         const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vila_alert_url: vilaAlertUrl, rules, interval, system_prompt: systemPrompt }),
+            body: JSON.stringify({ vila_alert_url: vilaAlertUrl, rules, interval }),
         });
         const data = await res.json();
         if (!res.ok || data.error) {

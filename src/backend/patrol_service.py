@@ -362,7 +362,6 @@ class PatrolService:
                     settings["vila_alert_url"],
                     robot_service.get_front_camera_image,
                     settings.get("live_monitor_interval", 5),
-                    system_prompt=settings.get("vila_system_prompt", ""),
                     telegram_config=tg_config,
                 )
                 live_monitor_active = True

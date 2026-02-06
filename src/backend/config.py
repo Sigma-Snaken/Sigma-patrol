@@ -69,7 +69,6 @@ DEFAULT_SETTINGS = {
     "vila_model": "VILA1.5-3B",
     "vila_alert_url": "",  # VILA alert endpoint (e.g. http://192.168.50.35:5015), empty = use chat API
 
-    "vila_system_prompt": "Answer only yes or no.",
     "enable_live_monitor": False,
     "live_monitor_interval": 5,
     "live_monitor_rules": [],

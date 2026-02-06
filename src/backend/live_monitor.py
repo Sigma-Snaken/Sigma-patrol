@@ -17,7 +17,7 @@ from utils import get_current_time_str
 
 logger = get_logger("live_monitor", "live_monitor.log")
 
-def _call_vila_chat(vila_url, data_url, rules, system_prompt="", timeout=30):
+def _call_vila_chat(vila_url, data_url, rules, timeout=30):
     """Call VILA chat completions once per rule (OpenAI-compatible).
 
     Sends one request per rule for reliable yes/no answers from small VLMs.
@@ -27,7 +27,7 @@ def _call_vila_chat(vila_url, data_url, rules, system_prompt="", timeout=30):
     answers = []
 
     for rule in rules:
-        question = f"{rule} {system_prompt}".strip() if system_prompt else rule
+        question = rule
         messages = []
         messages.append({
             "role": "user",
@@ -69,7 +69,7 @@ class LiveMonitor:
         self._lock = threading.Lock()
 
     def start(self, run_id, alert_rules, vila_alert_url, frame_func, check_interval=5.0,
-              system_prompt="", telegram_config=None):
+              telegram_config=None):
         """Start background monitoring.
 
         Args:
@@ -78,7 +78,6 @@ class LiveMonitor:
             vila_alert_url: VILA alert endpoint base URL.
             frame_func: Callable returning camera image (gRPC response with .data).
             check_interval: Seconds between checks.
-            system_prompt: Prompt appended to each rule question.
             telegram_config: Optional dict with keys: bot_token, user_id. If provided, alerts are sent to Telegram.
         """
         if self.is_monitoring:
@@ -89,7 +88,6 @@ class LiveMonitor:
         self.vila_alert_url = vila_alert_url.rstrip("/")
         self.frame_func = frame_func
         self.check_interval = check_interval
-        self.system_prompt = system_prompt
         self.telegram_config = telegram_config
         self.alerts = []
         self.alert_cooldowns = {}
@@ -149,7 +147,7 @@ class LiveMonitor:
         data_url = f"data:image/jpeg;base64,{b64}"
 
         # 3. Call VILA chat completions
-        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.alert_rules, self.system_prompt)
+        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.alert_rules)
 
         # 4. Process each rule's response
         now = time.time()
@@ -250,14 +248,13 @@ class TestLiveMonitor:
         self.error = None
         self.check_count = 0
 
-    def start(self, vila_alert_url, rules, frame_func, interval=5.0, system_prompt=""):
+    def start(self, vila_alert_url, rules, frame_func, interval=5.0):
         if self.is_running:
             return
         self.vila_alert_url = vila_alert_url.rstrip("/")
         self.rules = list(rules)
         self.frame_func = frame_func
         self.interval = interval
-        self.system_prompt = system_prompt
         self.results = []
         self.error = None
         self.check_count = 0
@@ -309,7 +306,7 @@ class TestLiveMonitor:
         b64 = base64.b64encode(img_response.data).decode()
         data_url = f"data:image/jpeg;base64,{b64}"
 
-        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.rules, self.system_prompt)
+        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.rules)
 
         timestamp = get_current_time_str()
         self.check_count += 1

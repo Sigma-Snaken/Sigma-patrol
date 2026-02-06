@@ -219,13 +219,11 @@ def test_live_monitor_start():
         return jsonify({"error": "At least one alert rule is required"}), 400
 
     interval = data.get('interval') or settings.get('live_monitor_interval', 5)
-    system_prompt = data.get('system_prompt') or settings.get('vila_system_prompt', '')
 
     test_live_monitor.start(
         vila_alert_url, rules,
         robot_service.get_front_camera_image,
         interval=float(interval),
-        system_prompt=system_prompt,
     )
     return jsonify({"status": "started"})
 
