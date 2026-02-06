@@ -31,6 +31,7 @@ import settings_service
 from robot_service import robot_service
 from patrol_service import patrol_service
 from ai_service import ai_service
+from live_monitor import test_live_monitor
 from pdf_service import generate_patrol_report, generate_analysis_report
 
 import logging
@@ -197,6 +198,47 @@ def test_ai_route():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# --- Test Live Monitor API ---
+
+@app.route('/api/test_live_monitor/start', methods=['POST'])
+def test_live_monitor_start():
+    if test_live_monitor.is_running:
+        return jsonify({"error": "Test already running"}), 409
+
+    data = request.json or {}
+    settings = settings_service.get_all()
+
+    vila_alert_url = data.get('vila_alert_url') or settings.get('vila_alert_url', '')
+    if not vila_alert_url:
+        return jsonify({"error": "VILA Alert URL is required"}), 400
+
+    rules = data.get('rules') or settings.get('live_monitor_rules', [])
+    if not rules:
+        return jsonify({"error": "At least one alert rule is required"}), 400
+
+    interval = data.get('interval') or settings.get('live_monitor_interval', 5)
+    system_prompt = data.get('system_prompt') or settings.get('vila_system_prompt', '')
+
+    test_live_monitor.start(
+        vila_alert_url, rules,
+        robot_service.get_front_camera_image,
+        interval=float(interval),
+        system_prompt=system_prompt,
+    )
+    return jsonify({"status": "started"})
+
+
+@app.route('/api/test_live_monitor/stop', methods=['POST'])
+def test_live_monitor_stop():
+    test_live_monitor.stop()
+    return jsonify({"status": "stopped"})
+
+
+@app.route('/api/test_live_monitor/status', methods=['GET'])
+def test_live_monitor_status():
+    return jsonify(test_live_monitor.get_status())
 
 
 # --- Patrol & Settings API ---
@@ -440,6 +482,22 @@ def handle_patrol_schedule_item(schedule_id):
         patrol_service.delete_schedule(schedule_id)
         return jsonify({"status": "deleted"})
 
+@app.route('/api/patrol/live_alerts', methods=['GET'])
+def get_live_alerts():
+    """Return live monitor alerts for the current patrol run."""
+    current_run_id = patrol_service.current_run_id
+    if not current_run_id:
+        return jsonify([])
+
+    with db_context() as (conn, cursor):
+        cursor.execute(
+            'SELECT id, rule, response, image_path, timestamp FROM live_alerts WHERE run_id = ? ORDER BY id DESC',
+            (current_run_id,)
+        )
+        rows = cursor.fetchall()
+
+    return jsonify([dict(r) for r in rows])
+
 @app.route('/api/patrol/results', methods=['GET'])
 def get_patrol_results():
     """Return inspection results for the current patrol run only."""
@@ -476,8 +534,8 @@ def get_token_usage_stats():
         if robot_id_filter:
             query_runs = '''
                 SELECT substr(start_time, 1, 10) as date,
-                       SUM(COALESCE(prompt_tokens, 0)) as input,
-                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(input_tokens, 0)) as input,
+                       SUM(COALESCE(output_tokens, 0)) as output,
                        SUM(COALESCE(total_tokens, 0)) as total
                 FROM patrol_runs
                 WHERE start_time IS NOT NULL AND robot_id = ?
@@ -487,8 +545,8 @@ def get_token_usage_stats():
         else:
             query_runs = '''
                 SELECT substr(start_time, 1, 10) as date,
-                       SUM(COALESCE(prompt_tokens, 0)) as input,
-                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(input_tokens, 0)) as input,
+                       SUM(COALESCE(output_tokens, 0)) as output,
                        SUM(COALESCE(total_tokens, 0)) as total
                 FROM patrol_runs
                 WHERE start_time IS NOT NULL
@@ -501,8 +559,8 @@ def get_token_usage_stats():
         if robot_id_filter:
             query_reports = '''
                 SELECT substr(timestamp, 1, 10) as date,
-                       SUM(COALESCE(prompt_tokens, 0)) as input,
-                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(input_tokens, 0)) as input,
+                       SUM(COALESCE(output_tokens, 0)) as output,
                        SUM(COALESCE(total_tokens, 0)) as total
                 FROM generated_reports
                 WHERE timestamp IS NOT NULL AND robot_id = ?
@@ -512,8 +570,8 @@ def get_token_usage_stats():
         else:
             query_reports = '''
                 SELECT substr(timestamp, 1, 10) as date,
-                       SUM(COALESCE(prompt_tokens, 0)) as input,
-                       SUM(COALESCE(candidate_tokens, 0)) as output,
+                       SUM(COALESCE(input_tokens, 0)) as input,
+                       SUM(COALESCE(output_tokens, 0)) as output,
                        SUM(COALESCE(total_tokens, 0)) as total
                 FROM generated_reports
                 WHERE timestamp IS NOT NULL
@@ -707,9 +765,13 @@ def get_history_detail(run_id):
         cursor.execute('SELECT * FROM inspection_results WHERE run_id = ?', (run_id,))
         inspections = cursor.fetchall()
 
+        cursor.execute('SELECT * FROM live_alerts WHERE run_id = ? ORDER BY id ASC', (run_id,))
+        live_alerts = cursor.fetchall()
+
     return jsonify({
         "run": dict(run),
-        "inspections": [dict(i) for i in inspections]
+        "inspections": [dict(i) for i in inspections],
+        "live_alerts": [dict(a) for a in live_alerts]
     })
 
 @app.route('/api/report/<int:run_id>/pdf')

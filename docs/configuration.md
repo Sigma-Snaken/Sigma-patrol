@@ -61,6 +61,18 @@ Manage settings through the **Settings** tab in the web UI, or via the API:
 | `video_prompt` | `"Analyze this video..."` | Prompt for AI video analysis after patrol |
 | `enable_idle_stream` | `true` | Show camera stream when not patrolling |
 
+### Live Monitor
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enable_live_monitor` | `false` | Enable background camera monitoring via VILA Alert API during patrol |
+| `live_monitor_interval` | `5` | Seconds between live monitor checks |
+| `live_monitor_rules` | `[]` | List of yes/no alert rule strings (e.g., `["Is there a person lying on the floor?", "Is there smoke or fire?"]`) |
+
+The live monitor requires `vila_alert_url` to be set (under AI Configuration). When enabled, the monitor runs as a daemon thread during patrol, capturing camera frames and evaluating each rule against the image. Triggered alerts are saved with evidence images and included in the patrol report.
+
+Each rule has a 60-second cooldown to prevent repeated alerts for the same condition.
+
 ### Report Prompts
 
 | Setting | Default | Description |
@@ -123,7 +135,10 @@ DEFAULT_SETTINGS = {
     "enable_idle_stream": True,
     "report_prompt": "...",  # Chinese inspection table template
     "multiday_report_prompt": "Generate a comprehensive summary...",
-    "telegram_message_prompt": "Based on the patrol inspection results below..."
+    "telegram_message_prompt": "Based on the patrol inspection results below...",
+    "enable_live_monitor": False,
+    "live_monitor_interval": 5,
+    "live_monitor_rules": [],
 }
 ```
 
@@ -207,6 +222,7 @@ Log files are written to `LOG_DIR` with robot-ID prefixes:
 | `{robot_id}_ai_service.log` | `ai_service.py` | AI inference logs, token usage |
 | `{robot_id}_patrol_service.log` | `patrol_service.py` | Patrol execution logs |
 | `{robot_id}_video_recorder.log` | `video_recorder.py` | Video recording logs |
+| `{robot_id}_live_monitor.log` | `live_monitor.py` | Live monitor alert logs |
 
 All loggers use `TimezoneFormatter` which formats timestamps in the configured timezone. Flask/Werkzeug request logging is suppressed (set to ERROR level).
 

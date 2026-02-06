@@ -16,6 +16,7 @@ src/backend/
 ├── patrol_service.py    # Patrol orchestration, scheduling
 ├── ai_service.py        # Google Gemini AI integration
 ├── pdf_service.py       # PDF report generation (ReportLab)
+├── live_monitor.py      # Background camera monitoring via VILA Alert API
 ├── video_recorder.py    # Video recording during patrols (OpenCV)
 ├── utils.py             # JSON I/O, timezone helpers
 ├── logger.py            # Timezone-aware logging setup
@@ -36,6 +37,7 @@ settings_service.py -- Reads global_settings table
 robot_service.py    -- Connects to Kachaka (reads ROBOT_IP from env)
 ai_service.py       -- Configures Gemini client (reads API key from settings)
 patrol_service.py   -- Imports robot_service, ai_service, settings_service
+live_monitor.py     -- Used by patrol_service (lazy import)
 pdf_service.py      -- Reads from database for report data
 video_recorder.py   -- Used by patrol_service
 utils.py            -- Used by patrol_service, app.py
@@ -71,6 +73,12 @@ Reads environment variables and defines filesystem paths.
 | `ROBOT_IMAGES_DIR` | `{ROBOT_DATA_DIR}/report/images` | Per-robot images |
 | `POINTS_FILE` | `{ROBOT_CONFIG_DIR}/points.json` | Waypoints file |
 | `SCHEDULE_FILE` | `{ROBOT_CONFIG_DIR}/patrol_schedule.json` | Schedule file |
+
+**Evidence path:**
+
+| Path | Value | Description |
+|------|-------|-------------|
+| `live_alerts` dir | `{ROBOT_DATA_DIR}/report/live_alerts` | Live monitor evidence images (created at runtime) |
 
 Also defines `DEFAULT_SETTINGS` dict with default values for all global settings, and `ensure_dirs()` / `migrate_legacy_files()` functions.
 
@@ -157,6 +165,18 @@ with db_context() as (conn, cursor):
 | `last_seen` | TEXT | Last heartbeat time |
 | `status` | TEXT | `online` or `offline` |
 
+**`live_alerts`** -- Live monitor alerts triggered during patrol
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-increment |
+| `run_id` | INTEGER FK | References `patrol_runs.id` |
+| `rule` | TEXT | Alert rule question that triggered |
+| `response` | TEXT | VILA Alert API response |
+| `image_path` | TEXT | Relative path to evidence image |
+| `timestamp` | TEXT | Alert timestamp |
+| `robot_id` | TEXT | Robot identifier |
+
 **`global_settings`** -- Key-value settings store
 
 | Column | Type | Description |
@@ -207,7 +227,7 @@ Manages the gRPC connection to a Kachaka robot.
 
 ### `ai_service.py`
 
-Google Gemini AI integration for visual inspection and report generation.
+AI integration for visual inspection and report generation. Uses Google Gemini as the VLM provider.
 
 **Singleton:** `ai_service = AIService()`
 
@@ -246,24 +266,98 @@ Orchestrates autonomous patrol missions.
 2. Validate AI is configured
 3. Create `patrol_runs` DB record
 4. Optionally start video recording
-5. For each waypoint:
+5. Optionally start live monitor (if `enable_live_monitor` is enabled and `vila_alert_url` is set)
+6. For each waypoint:
    a. Move robot to point (`_move_to_point`)
    b. Wait 2 seconds for stability
-   c. Capture front camera image
-   d. Run AI inspection (sync or async via turbo mode)
-   e. Save result to `inspection_results` table
-6. Return home
-7. Wait for async queue (turbo mode)
-8. Optionally analyze video
-9. Generate AI summary report
-10. Generate AI-summarized Telegram message and send notification (if enabled)
-11. Update run status and tokens
+   c. Pause live monitor
+   d. Capture front camera image
+   e. Run AI inspection (sync or async via turbo mode)
+   f. Save result to `inspection_results` table
+   g. Resume live monitor
+7. Stop live monitor
+8. Return home
+9. Wait for async queue (turbo mode)
+10. Optionally analyze video
+11. Generate AI summary report (includes live monitor alerts if any)
+12. Generate AI-summarized Telegram message and send notification (if enabled)
+13. Update run status and tokens
 
 **Turbo mode:** When enabled, images are queued for AI analysis while the robot continues moving to the next waypoint. The `_inspection_worker` thread processes the queue in the background.
 
 **Schedule checker:** A background thread runs every 30 seconds, comparing the current time against enabled schedules. Each schedule can only trigger once per day (tracked by `trigger_key`).
 
 **Image naming:** Images are saved as `{point_name}_processing_{uuid}.jpg` during capture, then renamed to `{point_name}_{OK|NG}_{uuid}.jpg` after AI analysis.
+
+### `live_monitor.py`
+
+Background camera monitoring via VILA during patrol, plus a test monitor for the settings page.
+
+**Singletons:** `live_monitor = LiveMonitor()`, `test_live_monitor = TestLiveMonitor()`
+
+#### VILA API Integration
+
+Uses the VILA OpenAI-compatible chat completions endpoint (`POST /v1/chat/completions`). Each alert rule is sent as a separate request with the camera frame as a base64 image.
+
+**Helper function:** `_call_vila_chat(vila_url, data_url, rules, system_prompt="", timeout=30)`
+
+- Sends one request per rule for reliable yes/no answers from small VLMs
+- The `system_prompt` is appended to each rule question (e.g., `"Is there a person? Answer only yes or no."`)
+- Returns a list of answer strings, one per rule
+
+**VILA response format:**
+
+VILA 3B (quantized) responds with `0`/`1` instead of `yes`/`no`:
+
+| Response | Meaning | Triggered? |
+|----------|---------|------------|
+| `0` | No | No |
+| `1` | Yes | Yes |
+| `no` | No | No |
+| `yes` | Yes | Yes |
+
+The backend treats `"yes"`, `"true"`, and `"1"` as triggered alerts. No system prompt is used in the `messages` array — VILA 3B produces better results with direct questions only.
+
+#### `LiveMonitor`
+
+Runs as a daemon thread alongside patrol.
+
+**Key methods:**
+
+| Method | Description |
+|--------|-------------|
+| `start(run_id, rules, url, frame_func, interval, system_prompt)` | Start background monitoring |
+| `stop()` | Stop monitoring and join thread |
+| `pause()` | Pause monitoring (during inspection points) |
+| `resume()` | Resume monitoring (after inspection) |
+| `get_alerts()` | Return list of alerts collected during this run |
+
+**Lifecycle during patrol:**
+
+1. Started after patrol run record is created (if `enable_live_monitor` is enabled and `vila_alert_url` is set)
+2. Paused before each waypoint inspection (`pause()`)
+3. Resumed after each waypoint inspection (`resume()`)
+4. Stopped in the `finally` block after the patrol loop ends
+5. Collected alerts are included in the AI summary report
+
+**Alert processing:**
+
+- Each check captures a camera frame, base64-encodes it, and calls `POST {vila_alert_url}/v1/chat/completions` once per rule
+- Per-rule cooldown of 60 seconds prevents repeated alerts for the same rule
+- Evidence images are saved to `data/{robot_id}/report/live_alerts/`
+- Alerts are stored in the `live_alerts` database table
+
+#### `TestLiveMonitor`
+
+Lightweight test monitor for the settings page — no DB writes, keeps up to 50 results in memory.
+
+**Key methods:**
+
+| Method | Description |
+|--------|-------------|
+| `start(url, rules, frame_func, interval, system_prompt)` | Start test session |
+| `stop()` | Stop test session |
+| `get_status()` | Return `{active, check_count, error, results}` |
 
 ### `pdf_service.py`
 

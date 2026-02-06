@@ -14,6 +14,12 @@ export async function loadSettings() {
     const data = await res.json();
     document.getElementById('setting-api-key').value = data.gemini_api_key || '';
     document.getElementById('setting-model').value = data.gemini_model || 'gemini-1.5-flash';
+
+    // VILA / Live Monitor
+    document.getElementById('setting-vila-server-url').value = data.vila_server_url || 'http://localhost:9000';
+    document.getElementById('setting-vila-model').value = data.vila_model || 'VILA1.5-3B';
+    document.getElementById('setting-vila-alert-url').value = data.vila_alert_url || '';
+    document.getElementById('setting-vila-system-prompt').value = data.vila_system_prompt || 'Answer only yes or no.';
     const tz = data.timezone || 'UTC';
     document.getElementById('setting-timezone').value = tz;
     state.currentSettingsTimezone = tz;
@@ -49,6 +55,19 @@ export async function loadSettings() {
 
     const telegramMessagePrompt = document.getElementById('setting-telegram-message-prompt');
     if (telegramMessagePrompt) telegramMessagePrompt.value = data.telegram_message_prompt || '';
+
+    // Live monitor settings
+    const liveMonitorCheckbox = document.getElementById('setting-enable-live-monitor');
+    if (liveMonitorCheckbox) liveMonitorCheckbox.checked = data.enable_live_monitor === true;
+
+    const liveMonitorInterval = document.getElementById('setting-live-monitor-interval');
+    if (liveMonitorInterval) liveMonitorInterval.value = data.live_monitor_interval || 5;
+
+    const liveMonitorRules = document.getElementById('setting-live-monitor-rules');
+    if (liveMonitorRules) {
+        const rules = data.live_monitor_rules || [];
+        liveMonitorRules.value = Array.isArray(rules) ? rules.join('\n') : '';
+    }
 
     // Load registered robots list
     loadRobotsList();
@@ -86,6 +105,11 @@ async function saveSettings() {
     const telegramUserVal = document.getElementById('setting-telegram-user-id').value;
 
     const settings = {
+        vlm_provider: 'gemini',
+        vila_server_url: document.getElementById('setting-vila-server-url')?.value || '',
+        vila_model: document.getElementById('setting-vila-model')?.value || '',
+        vila_alert_url: document.getElementById('setting-vila-alert-url')?.value || '',
+        vila_system_prompt: document.getElementById('setting-vila-system-prompt')?.value || '',
         gemini_api_key: apiKeyVal,
         gemini_model: document.getElementById('setting-model').value,
         timezone: document.getElementById('setting-timezone').value,
@@ -100,6 +124,10 @@ async function saveSettings() {
         telegram_bot_token: document.getElementById('setting-telegram-bot-token').value,
         telegram_user_id: document.getElementById('setting-telegram-user-id').value,
         telegram_message_prompt: document.getElementById('setting-telegram-message-prompt')?.value || '',
+        enable_live_monitor: document.getElementById('setting-enable-live-monitor')?.checked || false,
+        live_monitor_interval: parseInt(document.getElementById('setting-live-monitor-interval')?.value || '5', 10),
+        live_monitor_rules: (document.getElementById('setting-live-monitor-rules')?.value || '')
+            .split('\n').map(s => s.trim()).filter(s => s.length > 0),
     };
     try {
         const res = await fetch('/api/settings', {
@@ -119,6 +147,112 @@ async function saveSettings() {
         alert('Failed to save settings: ' + e.message);
     }
 }
+
+// --- Test Live Monitor ---
+let _testLiveMonitorPollId = null;
+
+export async function testLiveMonitor() {
+    const btn = document.getElementById('btn-test-live-monitor');
+    const statusEl = document.getElementById('live-monitor-test-status');
+    const resultsEl = document.getElementById('live-monitor-test-results');
+
+    // If already running, stop it
+    if (_testLiveMonitorPollId) {
+        await fetch(`/api/${state.selectedRobotId}/test_live_monitor/stop`, { method: 'POST' });
+        clearInterval(_testLiveMonitorPollId);
+        _testLiveMonitorPollId = null;
+        btn.textContent = 'Test Live Monitor';
+        btn.classList.remove('btn-danger');
+        statusEl.textContent = 'Stopped';
+        return;
+    }
+
+    // Read current form values
+    const vilaAlertUrl = document.getElementById('setting-vila-alert-url')?.value || '';
+    const rulesText = document.getElementById('setting-live-monitor-rules')?.value || '';
+    const interval = parseInt(document.getElementById('setting-live-monitor-interval')?.value || '5', 10);
+    const systemPrompt = document.getElementById('setting-vila-system-prompt')?.value || '';
+    const rules = rulesText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+
+    if (!vilaAlertUrl) {
+        alert('Please enter a VILA Alert URL first.');
+        return;
+    }
+    if (rules.length === 0) {
+        alert('Please enter at least one alert rule.');
+        return;
+    }
+
+    // Start test
+    statusEl.textContent = 'Starting...';
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '';
+
+    try {
+        const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vila_alert_url: vilaAlertUrl, rules, interval, system_prompt: systemPrompt }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            statusEl.textContent = 'Error: ' + (data.error || 'Unknown');
+            return;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        return;
+    }
+
+    btn.textContent = 'Stop Test';
+    btn.classList.add('btn-danger');
+    statusEl.textContent = 'Running...';
+
+    let lastCheckCount = 0;
+
+    // Poll for results
+    _testLiveMonitorPollId = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/status`);
+            const status = await res.json();
+
+            if (!status.active && _testLiveMonitorPollId) {
+                clearInterval(_testLiveMonitorPollId);
+                _testLiveMonitorPollId = null;
+                btn.textContent = 'Test Live Monitor';
+                btn.classList.remove('btn-danger');
+                statusEl.textContent = 'Stopped';
+                return;
+            }
+
+            statusEl.textContent = `Running... (${status.check_count} checks)`;
+            if (status.error) {
+                statusEl.textContent += ` | Error: ${status.error}`;
+            }
+
+            // Append only new results
+            const newResults = status.results.filter(r => r.check_id > lastCheckCount);
+            for (const entry of newResults) {
+                const lines = entry.responses.map(r => {
+                    const isYes = ['yes', 'true', '1'].includes(r.answer.toLowerCase());
+                    const label = isYes ? 'YES' : 'NO';
+                    const color = isYes ? 'var(--coral, #e74c3c)' : 'var(--green, #2ecc71)';
+                    return `<span style="color:${color}; font-weight:600;">[${label}]</span> ${escapeHtml(r.rule)}`;
+                }).join('<br>');
+                resultsEl.innerHTML += `<div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border-subtle);">` +
+                    `<div style="color:var(--text-muted); margin-bottom:2px;">#${entry.check_id} — ${escapeHtml(entry.timestamp)}</div>` +
+                    `${lines}</div>`;
+                lastCheckCount = entry.check_id;
+            }
+
+            // Auto-scroll to bottom
+            resultsEl.scrollTop = resultsEl.scrollHeight;
+        } catch (e) {
+            // ignore poll errors
+        }
+    }, 2000);
+}
+window.testLiveMonitor = testLiveMonitor;
 
 function startClock() {
     if (state._intervals.clock) return; // Prevent duplicate intervals

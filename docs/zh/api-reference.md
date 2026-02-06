@@ -1,23 +1,23 @@
-# API Reference
+# API 參考文件
 
-## URL Convention
+## URL 慣例
 
-All API endpoints are prefixed with `/api/`.
+所有 API 端點以 `/api/` 開頭。
 
-- **Robot-specific**: `/api/{robot-id}/endpoint` -- nginx strips the `{robot-id}` prefix before proxying to the matching backend. The backend sees `/api/endpoint`.
-- **Global**: `/api/endpoint` -- proxied to any backend (all share the same database).
+- **機器人專屬**: `/api/{robot-id}/endpoint` -- nginx 移除 `{robot-id}` 前綴後代理至對應的後端。後端收到的是 `/api/endpoint`。
+- **全域**: `/api/endpoint` -- 代理至任一後端 (所有後端共用同一個資料庫)。
 
-`{robot-id}` must match the pattern `robot-[a-z0-9-]+` (e.g., `robot-a`, `robot-b`).
+`{robot-id}` 必須符合 `robot-[a-z0-9-]+` 格式 (例：`robot-a`、`robot-b`)。
 
 ---
 
-## Robot Control (robot-specific)
+## 機器人控制 (機器人專屬)
 
 ### GET `/api/{id}/state`
 
-Returns the robot's current status.
+回傳機器人目前狀態。
 
-**Response:**
+**回應：**
 ```json
 {
   "battery": 85,
@@ -36,9 +36,9 @@ Returns the robot's current status.
 
 ### GET `/api/{id}/robot_info`
 
-Returns robot identity only.
+僅回傳機器人識別資訊。
 
-**Response:**
+**回應：**
 ```json
 {
   "robot_id": "robot-a",
@@ -48,15 +48,15 @@ Returns robot identity only.
 
 ### GET `/api/{id}/map`
 
-Returns the robot's PNG map image.
+回傳機器人的 PNG 地圖圖片。
 
-**Response:** `image/png` binary data or `404` if map not available.
+**回應：** `image/png` 二進位資料，若地圖不可用則回傳 `404`。
 
 ### POST `/api/{id}/move`
 
-Move the robot to a target pose.
+移動機器人至目標位姿。
 
-**Request:**
+**請求：**
 ```json
 {
   "x": 1.5,
@@ -65,80 +65,80 @@ Move the robot to a target pose.
 }
 ```
 
-- `x`, `y`: Required (float). World coordinates.
-- `theta`: Optional (float, default `0.0`). Orientation in radians, must be between -2pi and 2pi.
+- `x`, `y`：必填 (float)。世界座標。
+- `theta`：選填 (float, 預設 `0.0`)。方向角 (弧度)，範圍 -2pi 至 2pi。
 
-**Response:**
+**回應：**
 ```json
 { "status": "Moving", "target": { "x": 1.5, "y": 2.0, "theta": 0.0 } }
 ```
 
-**Errors:** `400` (missing/invalid params), `503` (robot disconnected).
+**錯誤：** `400` (參數缺少/無效)、`503` (機器人斷線)。
 
 ### POST `/api/{id}/manual_control`
 
-Send a manual D-pad control command.
+發送手動方向鍵控制指令。
 
-**Request:**
+**請求：**
 ```json
 { "action": "forward" }
 ```
 
-Valid actions: `forward` (0.1m), `backward` (-0.1m), `left` (+10 deg), `right` (-10 deg).
+有效動作：`forward` (0.1m)、`backward` (-0.1m)、`left` (+10 度)、`right` (-10 度)。
 
-**Response:**
+**回應：**
 ```json
 { "status": "Command sent", "action": "forward" }
 ```
 
 ### POST `/api/{id}/return_home`
 
-Command the robot to return to its charging station.
+命令機器人返回充電座。
 
-**Response:**
+**回應：**
 ```json
 { "status": "Returning home" }
 ```
 
 ### POST `/api/{id}/cancel_command`
 
-Cancel the robot's current movement command.
+取消機器人目前的移動指令。
 
-**Response:**
+**回應：**
 ```json
 { "status": "Command cancelled" }
 ```
 
 ### GET `/api/{id}/camera/front`
 
-Returns an MJPEG stream from the robot's front camera.
+回傳機器人前置鏡頭的 MJPEG 串流。
 
-**Response:** `multipart/x-mixed-replace; boundary=frame` (continuous JPEG stream at ~20fps).
+**回應：** `multipart/x-mixed-replace; boundary=frame` (連續 JPEG 串流，約 20fps)。
 
 ### GET `/api/{id}/camera/back`
 
-Returns an MJPEG stream from the robot's back camera.
+回傳機器人後置鏡頭的 MJPEG 串流。
 
-**Response:** Same format as front camera.
+**回應：** 格式同前置鏡頭。
 
 ---
 
-## AI Test (robot-specific)
+## AI 測試 (機器人專屬)
 
 ### POST `/api/{id}/test_ai`
 
-Capture an image from the front camera and run AI analysis.
+從前置鏡頭擷取影像並執行 AI 分析。
 
-**Request:**
+**請求：**
 ```json
 {
   "prompt": "Is there a fire hazard?"
 }
 ```
 
-- `prompt`: Optional. Defaults to `"Describe what you see and check if everything is normal."`
+- `prompt`：選填。預設為 `"Describe what you see and check if everything is normal."`
 
-**Response:**
+**回應：**
 ```json
 {
   "result": { "is_NG": false, "Description": "Everything appears normal." },
@@ -151,49 +151,49 @@ Capture an image from the front camera and run AI analysis.
 }
 ```
 
-**Errors:** `503` (camera unavailable), `500` (AI error).
+**錯誤：** `503` (鏡頭不可用)、`500` (AI 錯誤)。
 
 ---
 
-## Test Live Monitor (robot-specific)
+## 即時監控測試 (機器人專屬)
 
 ### POST `/api/{id}/test_live_monitor/start`
 
-Start a test live monitor session. Captures camera frames and sends them to the VILA chat completions API.
+啟動即時監控測試。擷取鏡頭畫面並送往 VILA chat completions API。
 
-**Request:**
+**請求：**
 ```json
 {
   "vila_alert_url": "http://192.168.50.35:9000",
-  "rules": ["Is there a person?", "Is there fire?"],
+  "rules": ["有沒有人？", "有沒有異常？"],
   "interval": 5,
   "system_prompt": "Answer only yes or no."
 }
 ```
 
-All fields are optional — falls back to saved settings if omitted.
+所有欄位皆為選填，未提供時使用已儲存的設定值。
 
-**Response:**
+**回應：**
 ```json
 { "status": "started" }
 ```
 
-**Errors:** `400` (missing URL or rules), `409` (test already running).
+**錯誤：** `400` (缺少 URL 或規則)、`409` (測試已在執行中)。
 
 ### POST `/api/{id}/test_live_monitor/stop`
 
-Stop the running test session.
+停止執行中的測試。
 
-**Response:**
+**回應：**
 ```json
 { "status": "stopped" }
 ```
 
 ### GET `/api/{id}/test_live_monitor/status`
 
-Returns the current test session state and results.
+返回目前測試狀態及結果。
 
-**Response:**
+**回應：**
 ```json
 {
   "active": true,
@@ -204,25 +204,25 @@ Returns the current test session state and results.
       "check_id": 1,
       "timestamp": "2026-02-06 23:05:58",
       "responses": [
-        { "rule": "Is there a person?", "answer": "0" },
-        { "rule": "Is there fire?", "answer": "0" }
+        { "rule": "有沒有人？", "answer": "0" },
+        { "rule": "有沒有異常？", "answer": "0" }
       ]
     }
   ]
 }
 ```
 
-**VILA response format:** VILA 3B responds with `0` (no) or `1` (yes) instead of text. The frontend normalizes these to `YES`/`NO` for display. The backend `LiveMonitor` treats `"yes"`, `"true"`, and `"1"` as triggered alerts.
+**VILA 回應格式：** VILA 3B 以 `0` (否) 或 `1` (是) 回答，而非文字。前端會正規化為 `YES`/`NO` 顯示。後端的 `LiveMonitor` 將 `"yes"`、`"true"`、`"1"` 視為觸發警報。
 
 ---
 
-## Patrol Management (robot-specific)
+## 巡檢管理 (機器人專屬)
 
 ### GET `/api/{id}/patrol/status`
 
-Returns the current patrol status.
+回傳目前巡檢狀態。
 
-**Response:**
+**回應：**
 ```json
 {
   "is_patrolling": true,
@@ -233,29 +233,29 @@ Returns the current patrol status.
 
 ### POST `/api/{id}/patrol/start`
 
-Start a patrol run. The robot will visit all enabled waypoints sequentially.
+啟動巡檢任務。機器人將依序造訪所有已啟用的巡檢點位。
 
-**Response:**
+**回應：**
 ```json
 { "status": "started" }
 ```
 
-**Errors:** `400` if already patrolling.
+**錯誤：** `400` 若已在巡檢中。
 
 ### POST `/api/{id}/patrol/stop`
 
-Stop the current patrol. The robot cancels its current command and returns home.
+停止目前巡檢。機器人取消目前指令並返回基地。
 
-**Response:**
+**回應：**
 ```json
 { "status": "stopping" }
 ```
 
 ### GET `/api/{id}/patrol/live_alerts`
 
-Returns live monitor alerts for the currently active patrol run. Returns empty list if no patrol is active or live monitor is not enabled.
+回傳目前進行中巡檢的即時監控警報。若無進行中的巡檢或即時監控未啟用，則回傳空列表。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -268,13 +268,13 @@ Returns live monitor alerts for the currently active patrol run. Returns empty l
 ]
 ```
 
-Results are ordered newest first (`ORDER BY id DESC`).
+結果按最新在前排列 (`ORDER BY id DESC`)。
 
 ### GET `/api/{id}/patrol/results`
 
-Returns inspection results for the currently active patrol run only. Returns empty list if no patrol is active.
+回傳目前進行中巡檢的檢查結果。若無進行中的巡檢則回傳空列表。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -287,9 +287,9 @@ Returns inspection results for the currently active patrol run only. Returns emp
 
 ### GET `/api/{id}/patrol/schedule`
 
-Returns all scheduled patrols for this robot.
+回傳此機器人的所有排程巡檢。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -301,13 +301,13 @@ Returns all scheduled patrols for this robot.
 ]
 ```
 
-Days: `0` = Monday through `6` = Sunday.
+星期：`0` = 週一 至 `6` = 週日。
 
 ### POST `/api/{id}/patrol/schedule`
 
-Add a new scheduled patrol.
+新增排程巡檢。
 
-**Request:**
+**請求：**
 ```json
 {
   "time": "08:00",
@@ -316,11 +316,11 @@ Add a new scheduled patrol.
 }
 ```
 
-- `time`: Required. Format `HH:MM`.
-- `days`: Optional. List of integers 0-6. Defaults to every day.
-- `enabled`: Optional. Default `true`.
+- `time`：必填。格式 `HH:MM`。
+- `days`：選填。整數列表 0-6。預設為每天。
+- `enabled`：選填。預設 `true`。
 
-**Response:**
+**回應：**
 ```json
 {
   "status": "added",
@@ -330,9 +330,9 @@ Add a new scheduled patrol.
 
 ### PUT `/api/{id}/patrol/schedule/{schedule_id}`
 
-Update a scheduled patrol.
+更新排程巡檢。
 
-**Request:**
+**請求：**
 ```json
 {
   "time": "09:00",
@@ -341,26 +341,26 @@ Update a scheduled patrol.
 }
 ```
 
-All fields are optional.
+所有欄位皆為選填。
 
 ### DELETE `/api/{id}/patrol/schedule/{schedule_id}`
 
-Delete a scheduled patrol.
+刪除排程巡檢。
 
-**Response:**
+**回應：**
 ```json
 { "status": "deleted" }
 ```
 
 ---
 
-## Points / Waypoints (robot-specific)
+## 巡檢點位 (機器人專屬)
 
 ### GET `/api/{id}/points`
 
-Returns all patrol waypoints for this robot.
+回傳此機器人的所有巡檢點位。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -377,9 +377,9 @@ Returns all patrol waypoints for this robot.
 
 ### POST `/api/{id}/points`
 
-Add or update a patrol waypoint.
+新增或更新巡檢點位。
 
-**Request:**
+**請求：**
 ```json
 {
   "id": "optional-existing-id",
@@ -392,41 +392,41 @@ Add or update a patrol waypoint.
 }
 ```
 
-- `name`, `x`, `y`: Required.
-- `id`: If provided and matches an existing point, updates it. Otherwise creates a new point with auto-generated ID.
+- `name`, `x`, `y`：必填。
+- `id`：若提供且匹配既有點位則更新。否則以自動產生的 ID 建立新點位。
 
 ### DELETE `/api/{id}/points?id={point_id}`
 
-Delete a patrol waypoint by ID.
+依 ID 刪除巡檢點位。
 
 ### POST `/api/{id}/points/reorder`
 
-Replace the entire points list (used for drag-and-drop reordering).
+取代整個點位列表 (用於拖曳排序)。
 
-**Request:** Array of point objects (same format as GET response).
+**請求：** 點位物件陣列 (格式同 GET 回應)。
 
 ### GET `/api/{id}/points/export`
 
-Download all points as a JSON file.
+下載所有點位為 JSON 檔案。
 
-**Response:** `application/json` file download (`patrol_points.json`).
+**回應：** `application/json` 檔案下載 (`patrol_points.json`)。
 
 ### POST `/api/{id}/points/import`
 
-Upload a JSON file to replace all points.
+上傳 JSON 檔案取代所有點位。
 
-**Request:** Multipart form with `file` field containing a JSON file.
+**請求：** 含 `file` 欄位的 Multipart 表單，內含 JSON 檔案。
 
-**Response:**
+**回應：**
 ```json
 { "status": "imported", "count": 5 }
 ```
 
 ### GET `/api/{id}/points/from_robot`
 
-Fetch saved locations from the Kachaka robot and merge with existing points. Skips duplicates (same name and coordinates).
+從 Kachaka 機器人取得已儲存的位置並合併至現有點位。跳過重複項 (相同名稱和座標)。
 
-**Response:**
+**回應：**
 ```json
 {
   "status": "success",
@@ -439,15 +439,15 @@ Fetch saved locations from the Kachaka robot and merge with existing points. Ski
 
 ---
 
-## Global Endpoints
+## 全域端點
 
 ### GET/POST `/api/settings`
 
-**GET** returns all settings. Sensitive fields (`gemini_api_key`, `telegram_bot_token`, `telegram_user_id`) are masked with `****` prefix.
+**GET** 回傳所有設定。敏感欄位 (`gemini_api_key`、`telegram_bot_token`、`telegram_user_id`) 以 `****` 前綴遮罩。
 
-**POST** saves settings. Masked values (starting with `****`) are ignored to prevent overwriting real values.
+**POST** 儲存設定。以 `****` 開頭的遮罩值會被忽略，避免覆寫實際儲存的值。
 
-**Response (GET):**
+**回應 (GET)：**
 ```json
 {
   "gemini_api_key": "****abcd",
@@ -470,15 +470,15 @@ Fetch saved locations from the Kachaka robot and merge with existing points. Ski
   "vila_system_prompt": "Answer only yes or no.",
   "enable_live_monitor": false,
   "live_monitor_interval": 5,
-  "live_monitor_rules": ["Is there a person?", "Is there fire?"]
+  "live_monitor_rules": ["有沒有人？", "有沒有異常？"]
 }
 ```
 
 ### GET `/api/robots`
 
-Returns all registered robots.
+回傳所有已註冊的機器人。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -491,16 +491,16 @@ Returns all registered robots.
 ]
 ```
 
-Robot status is based on Kachaka gRPC connection health, updated every 30 seconds by the heartbeat thread.
+機器人狀態根據 Kachaka gRPC 連線健康度判定，由心跳執行緒每 30 秒更新。
 
 ### GET `/api/history`
 
-Returns all patrol runs, newest first.
+回傳所有巡檢記錄，最新在前。
 
-**Query params:**
-- `robot_id`: Optional. Filter by robot.
+**查詢參數：**
+- `robot_id`：選填。依機器人篩選。
 
-**Response:**
+**回應：**
 ```json
 [
   {
@@ -519,9 +519,9 @@ Returns all patrol runs, newest first.
 
 ### GET `/api/history/{run_id}`
 
-Returns detailed patrol run info with all inspection results.
+回傳巡檢詳細資料及所有檢查結果。
 
-**Response:**
+**回應：**
 ```json
 {
   "run": { "id": 42, "start_time": "...", "status": "Completed", ... },
@@ -557,15 +557,15 @@ Returns detailed patrol run info with all inspection results.
 
 ### GET `/api/report/{run_id}/pdf`
 
-Generate and download a PDF report for a single patrol run.
+產生並下載單次巡檢的 PDF 報告。
 
-**Response:** `application/pdf` file download.
+**回應：** `application/pdf` 檔案下載。
 
 ### POST `/api/reports/generate`
 
-Generate an AI-powered analysis report for a date range.
+產生日期範圍內的 AI 分析報告。
 
-**Request:**
+**請求：**
 ```json
 {
   "start_date": "2026-02-01",
@@ -575,11 +575,11 @@ Generate an AI-powered analysis report for a date range.
 }
 ```
 
-- `start_date`, `end_date`: Required.
-- `prompt`: Optional. Uses configured default if not provided.
-- `robot_id`: Optional. Filter by robot.
+- `start_date`, `end_date`：必填。
+- `prompt`：選填。未提供時使用已設定的預設值。
+- `robot_id`：選填。依機器人篩選。
 
-**Response:**
+**回應：**
 ```json
 {
   "id": 5,
@@ -594,20 +594,20 @@ Generate an AI-powered analysis report for a date range.
 
 ### GET `/api/reports/generate/pdf`
 
-Download the most recently generated analysis report as PDF.
+下載最近一次產生的分析報告 PDF。
 
-**Query params:**
-- `start_date`: Required.
-- `end_date`: Required.
+**查詢參數：**
+- `start_date`：必填。
+- `end_date`：必填。
 
 ### GET `/api/stats/token_usage`
 
-Returns daily token usage aggregated from patrol runs and generated reports.
+回傳從巡檢記錄及產生的報告彙總的每日 token 使用量。
 
-**Query params:**
-- `robot_id`: Optional. Filter by robot.
+**查詢參數：**
+- `robot_id`：選填。依機器人篩選。
 
-**Response:**
+**回應：**
 ```json
 [
   { "date": "2026-02-05", "input": 1000, "output": 200, "total": 1200 },
@@ -617,12 +617,12 @@ Returns daily token usage aggregated from patrol runs and generated reports.
 
 ---
 
-## Image Serving (robot-specific)
+## 圖片服務 (機器人專屬)
 
 ### GET `/api/{id}/images/{filename}`
 
-Serves inspection images. Tries the robot's image directory first, then falls back to the legacy directory.
+提供巡檢圖片。優先從機器人的圖片目錄取得，若不存在則回退至舊版目錄。
 
 ### GET `/api/robots/{robot_id}/images/{filename}`
 
-Serves images from a specific robot's directory. Used in history views where the viewing robot may differ from the image source robot.
+從特定機器人的目錄提供圖片。用於歷史記錄視圖中，瀏覽的機器人可能與圖片來源機器人不同的情境。

@@ -42,35 +42,74 @@ def db_context():
 
 def get_run_token_totals(run_id):
     """
-    Calculate total tokens used in a patrol run.
-    Returns dict with prompt_tokens, candidate_tokens, total_tokens.
+    Calculate total tokens used in a patrol run across all categories.
+    Returns dict with input_tokens, output_tokens, total_tokens per category.
     """
     with db_context() as (conn, cursor):
+        # Inspection tokens (aggregated from inspection_results)
         cursor.execute('''
             SELECT
-                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-                COALESCE(SUM(candidate_tokens), 0) as candidate_tokens,
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
                 COALESCE(SUM(total_tokens), 0) as total_tokens
             FROM inspection_results
             WHERE run_id = ?
         ''', (run_id,))
-        row = cursor.fetchone()
+        insp = cursor.fetchone()
+
+        # Per-category tokens from patrol_runs
+        cursor.execute('''
+            SELECT
+                COALESCE(report_input_tokens, 0) as report_input,
+                COALESCE(report_output_tokens, 0) as report_output,
+                COALESCE(report_total_tokens, 0) as report_total,
+                COALESCE(telegram_input_tokens, 0) as tg_input,
+                COALESCE(telegram_output_tokens, 0) as tg_output,
+                COALESCE(telegram_total_tokens, 0) as tg_total,
+                COALESCE(video_input_tokens, 0) as vid_input,
+                COALESCE(video_output_tokens, 0) as vid_output,
+                COALESCE(video_total_tokens, 0) as vid_total
+            FROM patrol_runs
+            WHERE id = ?
+        ''', (run_id,))
+        run = cursor.fetchone()
+
+        insp_in = insp['input_tokens']
+        insp_out = insp['output_tokens']
+        insp_total = insp['total_tokens']
+
+        report_in = run['report_input'] if run else 0
+        report_out = run['report_output'] if run else 0
+        report_total = run['report_total'] if run else 0
+
+        tg_in = run['tg_input'] if run else 0
+        tg_out = run['tg_output'] if run else 0
+        tg_total = run['tg_total'] if run else 0
+
+        vid_in = run['vid_input'] if run else 0
+        vid_out = run['vid_output'] if run else 0
+        vid_total = run['vid_total'] if run else 0
+
+        grand_in = insp_in + report_in + tg_in + vid_in
+        grand_out = insp_out + report_out + tg_out + vid_out
+        grand_total = insp_total + report_total + tg_total + vid_total
+
         return {
-            'prompt_tokens': row['prompt_tokens'],
-            'candidate_tokens': row['candidate_tokens'],
-            'total_tokens': row['total_tokens']
+            'input_tokens': grand_in,
+            'output_tokens': grand_out,
+            'total_tokens': grand_total,
         }
 
 
 def update_run_tokens(run_id):
-    """Update patrol_runs table with aggregated token counts."""
+    """Update patrol_runs table with grand total token counts."""
     totals = get_run_token_totals(run_id)
     with db_context() as (conn, cursor):
         cursor.execute('''
             UPDATE patrol_runs
-            SET prompt_tokens = ?, candidate_tokens = ?, total_tokens = ?
+            SET input_tokens = ?, output_tokens = ?, total_tokens = ?
             WHERE id = ?
-        ''', (totals['prompt_tokens'], totals['candidate_tokens'],
+        ''', (totals['input_tokens'], totals['output_tokens'],
               totals['total_tokens'], run_id))
 
 
@@ -79,7 +118,7 @@ def save_generated_report(start_date, end_date, content, usage, robot_id=None):
     with db_context() as (conn, cursor):
         cursor.execute('''
             INSERT INTO generated_reports
-            (start_date, end_date, report_content, prompt_tokens, candidate_tokens, total_tokens, timestamp, robot_id)
+            (start_date, end_date, report_content, input_tokens, output_tokens, total_tokens, timestamp, robot_id)
             VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)
         ''', (start_date, end_date, content,
               usage.get('prompt_token_count', 0),
@@ -172,12 +211,21 @@ def init_db():
             report_content TEXT,
             model_id TEXT,
             token_usage TEXT,
-            prompt_tokens INTEGER,
-            candidate_tokens INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
             total_tokens INTEGER,
             video_path TEXT,
             video_analysis TEXT,
-            robot_id TEXT
+            robot_id TEXT,
+            report_input_tokens INTEGER,
+            report_output_tokens INTEGER,
+            report_total_tokens INTEGER,
+            telegram_input_tokens INTEGER,
+            telegram_output_tokens INTEGER,
+            telegram_total_tokens INTEGER,
+            video_input_tokens INTEGER,
+            video_output_tokens INTEGER,
+            video_total_tokens INTEGER
         )
     ''')
 
@@ -187,8 +235,8 @@ def init_db():
             start_date TEXT,
             end_date TEXT,
             report_content TEXT,
-            prompt_tokens INTEGER,
-            candidate_tokens INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
             total_tokens INTEGER,
             timestamp TEXT,
             robot_id TEXT
@@ -207,8 +255,8 @@ def init_db():
             is_ng INTEGER,
             ai_description TEXT,
             token_usage TEXT,
-            prompt_tokens INTEGER,
-            candidate_tokens INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
             total_tokens INTEGER,
             image_path TEXT,
             timestamp TEXT,
@@ -233,6 +281,19 @@ def init_db():
         CREATE TABLE IF NOT EXISTS global_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS live_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER,
+            rule TEXT,
+            response TEXT,
+            image_path TEXT,
+            timestamp TEXT,
+            robot_id TEXT,
+            FOREIGN KEY(run_id) REFERENCES patrol_runs(id)
         )
     ''')
 
@@ -269,3 +330,62 @@ def _run_migrations(cursor):
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
                 except Exception as e:
                     print(f"  Migration warning: {e}")
+
+    # Rename prompt_tokens → input_tokens, candidate_tokens → output_tokens
+    _rename_token_columns(cursor)
+
+    # Add per-category token columns to patrol_runs
+    _add_category_token_columns(cursor)
+
+
+def _rename_token_columns(cursor):
+    """Rename prompt_tokens→input_tokens, candidate_tokens→output_tokens on all 3 tables."""
+    renames = [
+        ('patrol_runs', 'prompt_tokens', 'input_tokens'),
+        ('patrol_runs', 'candidate_tokens', 'output_tokens'),
+        ('inspection_results', 'prompt_tokens', 'input_tokens'),
+        ('inspection_results', 'candidate_tokens', 'output_tokens'),
+        ('generated_reports', 'prompt_tokens', 'input_tokens'),
+        ('generated_reports', 'candidate_tokens', 'output_tokens'),
+    ]
+    for table, old_col, new_col in renames:
+        # Check if old column exists and new one doesn't
+        try:
+            cursor.execute(f"SELECT {old_col} FROM {table} LIMIT 1")
+        except sqlite3.OperationalError:
+            continue  # old column doesn't exist, nothing to rename
+        try:
+            cursor.execute(f"SELECT {new_col} FROM {table} LIMIT 1")
+            continue  # new column already exists, skip
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute(f"ALTER TABLE {table} RENAME COLUMN {old_col} TO {new_col}")
+            print(f"Migrating: Renamed {table}.{old_col} → {new_col}")
+        except Exception as e:
+            print(f"  Migration warning (rename {table}.{old_col}): {e}")
+
+
+def _add_category_token_columns(cursor):
+    """Add per-category token columns to patrol_runs."""
+    new_cols = [
+        'report_input_tokens INTEGER',
+        'report_output_tokens INTEGER',
+        'report_total_tokens INTEGER',
+        'telegram_input_tokens INTEGER',
+        'telegram_output_tokens INTEGER',
+        'telegram_total_tokens INTEGER',
+        'video_input_tokens INTEGER',
+        'video_output_tokens INTEGER',
+        'video_total_tokens INTEGER',
+    ]
+    for col_def in new_cols:
+        col_name = col_def.split()[0]
+        try:
+            cursor.execute(f"SELECT {col_name} FROM patrol_runs LIMIT 1")
+        except sqlite3.OperationalError:
+            try:
+                cursor.execute(f"ALTER TABLE patrol_runs ADD COLUMN {col_def}")
+                print(f"Migrating: Added patrol_runs.{col_name}")
+            except Exception as e:
+                print(f"  Migration warning: {e}")

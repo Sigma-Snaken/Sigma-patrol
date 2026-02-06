@@ -201,6 +201,7 @@ Renders three separate table views:
 - Displays latest AI analysis result
 - Shows scrollable history of current patrol results
 - Manages camera stream (active during patrol, optionally during idle)
+- **Live Alerts panel**: When live monitoring is active, polls `GET /api/{id}/patrol/live_alerts` each second and renders triggered alerts in a red-themed collapsible panel with a badge counter
 
 ### `schedule.js` -- Scheduled Patrols
 
@@ -224,6 +225,7 @@ Renders three separate table views:
 - Displays registered robots list
 - Manages the header clock (uses configured timezone)
 - Settings include: API key, model, timezone, prompts, feature toggles, Telegram config
+- **Live Monitor settings**: Shown only when VLM provider is VILA and alert URL is set. Includes enable checkbox, check interval (2-30s), and alert rules textarea (one rule per line)
 
 ### `stats.js` -- Token Usage Statistics
 

@@ -51,6 +51,7 @@ function startPatrolPolling() {
         updateCameraStream(shouldStream);
 
         loadResults();
+        loadLiveAlerts(data.is_patrolling);
     }, 1000);
 }
 
@@ -133,3 +134,56 @@ export async function loadResults() {
         }
     });
 }
+
+async function loadLiveAlerts(isPatrolling) {
+    const frame = document.getElementById('live-alerts-frame');
+    const list = document.getElementById('live-alerts-list');
+    const badge = document.getElementById('live-alerts-badge');
+    if (!frame || !list) return;
+
+    if (!isPatrolling || !state.selectedRobotId) {
+        // Hide when not patrolling (but keep visible if there were alerts)
+        if (badge && badge.textContent === '0') {
+            frame.style.display = 'none';
+        }
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/${state.selectedRobotId}/patrol/live_alerts`);
+        const alerts = await res.json();
+
+        if (alerts.length === 0) {
+            frame.style.display = 'none';
+            return;
+        }
+
+        frame.style.display = 'block';
+        if (badge) {
+            badge.textContent = alerts.length;
+            badge.style.display = 'inline';
+        }
+
+        list.innerHTML = alerts.map(a => `
+            <div style="padding: 8px; margin-bottom: 6px; background: rgba(220,53,69,0.08); border-left: 3px solid #dc3545; border-radius: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="color: #dc3545; font-weight: bold; font-size: 12px;">${escapeHtml(a.rule)}</span>
+                    <span style="font-size: 10px; color: var(--text-muted);">${escapeHtml(a.timestamp)}</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary);">Response: ${escapeHtml(a.response)}</div>
+            </div>
+        `).join('');
+    } catch (e) {
+        // Silently ignore fetch errors during polling
+    }
+}
+
+window.toggleLiveAlertsPanel = function() {
+    const content = document.getElementById('live-alerts-content');
+    const toggle = document.getElementById('live-alerts-toggle');
+    if (content && toggle) {
+        const hidden = content.style.display === 'none';
+        content.style.display = hidden ? 'block' : 'none';
+        toggle.textContent = hidden ? '▼' : '▶';
+    }
+};

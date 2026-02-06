@@ -272,13 +272,13 @@ class PatrolService:
                 cursor.execute('''
                     INSERT INTO inspection_results
                     (run_id, point_name, coordinate_x, coordinate_y, prompt, ai_response,
-                     is_ng, ai_description, token_usage, prompt_tokens, candidate_tokens,
+                     is_ng, ai_description, token_usage, input_tokens, output_tokens,
                      total_tokens, image_path, timestamp, robot_moving_status, robot_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     run_id, point_name, point.get('x'), point.get('y'), prompt,
                     parsed['result_text'], 1 if parsed['is_ng'] else 0, parsed['description'],
-                    parsed['usage_json'], parsed['prompt_tokens'], parsed['candidate_tokens'],
+                    parsed['usage_json'], parsed['input_tokens'], parsed['output_tokens'],
                     parsed['total_tokens'], rel_path, get_current_time_str(), move_status,
                     ROBOT_ID
                 ))
@@ -344,6 +344,22 @@ class PatrolService:
             recorder = VideoRecorder(video_filename, robot_service.get_front_camera_image)
             recorder.start()
 
+        # Live monitor setup
+        from live_monitor import live_monitor
+        live_monitor_active = False
+        if settings.get("enable_live_monitor") and settings.get("vila_alert_url"):
+            rules = settings.get("live_monitor_rules", [])
+            if rules:
+                live_monitor.start(
+                    self.current_run_id,
+                    rules,
+                    settings["vila_alert_url"],
+                    robot_service.get_front_camera_image,
+                    settings.get("live_monitor_interval", 5),
+                    system_prompt=settings.get("vila_system_prompt", ""),
+                )
+                live_monitor_active = True
+
         inspections_data = []
         turbo_mode = settings.get('turbo_mode', False)
 
@@ -366,7 +382,7 @@ class PatrolService:
                     self._save_inspection(
                         self.current_run_id, point, point_name, "",
                         {'result_text': "Move Failed", 'is_ng': True, 'description': move_status,
-                         'prompt_tokens': 0, 'candidate_tokens': 0, 'total_tokens': 0, 'usage_json': '{}'},
+                         'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0, 'usage_json': '{}'},
                         "", move_status
                     )
                     time.sleep(1)
@@ -380,11 +396,23 @@ class PatrolService:
                 self._set_status(f"Inspecting {point_name}...")
                 time.sleep(2)
 
+                if live_monitor_active:
+                    live_monitor.pause()
+
                 self._inspect_point(
                     point, point_name, run_images_dir, settings,
                     turbo_mode, inspections_data
                 )
+
+                if live_monitor_active:
+                    live_monitor.resume()
         finally:
+            # Ensure live monitor is always stopped
+            if live_monitor_active:
+                try:
+                    live_monitor.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping live monitor: {e}")
             # Ensure video recorder is always stopped
             if recorder:
                 try:
@@ -424,25 +452,53 @@ class PatrolService:
                     vid_prompt = settings.get("video_prompt", "Analyze this patrol video.")
                     analysis_result = ai_service.analyze_video(video_filename, vid_prompt)
                     video_analysis_text = analysis_result['result']
+                    # Save video token usage
+                    vid_usage = analysis_result.get('usage', {})
+                    with db_context() as (conn, cursor):
+                        cursor.execute('''
+                            UPDATE patrol_runs
+                            SET video_input_tokens = ?, video_output_tokens = ?, video_total_tokens = ?
+                            WHERE id = ?
+                        ''', (vid_usage.get('prompt_token_count', 0),
+                              vid_usage.get('candidates_token_count', 0),
+                              vid_usage.get('total_token_count', 0),
+                              self.current_run_id))
                 except Exception as e:
                     logger.error(f"Video analysis failed: {e}")
                     video_analysis_text = f"Analysis Failed: {e}"
 
+            # Write end_time and status before report generation so PDF has complete info
+            try:
+                with db_context() as (conn, cursor):
+                    cursor.execute(
+                        'UPDATE patrol_runs SET end_time = ?, status = ?, video_path = ?, video_analysis = ? WHERE id = ?',
+                        (get_current_time_str(), final_status, video_path, video_analysis_text, self.current_run_id)
+                    )
+            except Exception as e:
+                logger.error(f"DB Error updating patrol status: {e}")
+
             self._set_status("Generating Report...")
-            self._generate_report(inspections_data, settings, video_analysis_text)
+            live_alert_data = live_monitor.get_alerts() if live_monitor_active else []
+            self._generate_report(inspections_data, settings, video_analysis_text, live_alert_data)
 
             self._set_status("Finished")
 
-        # Update run status and tokens
+        else:
+            # Patrol was stopped — still write end_time and status
+            try:
+                with db_context() as (conn, cursor):
+                    cursor.execute(
+                        'UPDATE patrol_runs SET end_time = ?, status = ? WHERE id = ?',
+                        (get_current_time_str(), final_status, self.current_run_id)
+                    )
+            except Exception as e:
+                logger.error(f"DB Error updating stopped patrol status: {e}")
+
+        # Update aggregated token totals (after report/telegram tokens are saved)
         try:
             update_run_tokens(self.current_run_id)
-            with db_context() as (conn, cursor):
-                cursor.execute(
-                    'UPDATE patrol_runs SET end_time = ?, status = ?, video_path = ?, video_analysis = ? WHERE id = ?',
-                    (get_current_time_str(), final_status, video_path, video_analysis_text, self.current_run_id)
-                )
         except Exception as e:
-            logger.error(f"DB Error updating patrol status: {e}")
+            logger.error(f"DB Error updating token totals: {e}")
 
         logger.info(f"Patrol Run {self.current_run_id} finished: {final_status}")
         with self.patrol_lock:
@@ -507,7 +563,7 @@ class PatrolService:
             self._set_status(f"Error at {point_name}")
             time.sleep(2)
 
-    def _generate_report(self, inspections_data, settings, video_analysis_text=None):
+    def _generate_report(self, inspections_data, settings, video_analysis_text=None, live_alert_data=None):
         """Generate AI summary report."""
         if not inspections_data:
             return
@@ -525,6 +581,12 @@ class PatrolService:
             if video_analysis_text:
                 report_prompt += f"\n\nVideo Analysis Summary:\n{video_analysis_text}\n\n"
 
+            if live_alert_data:
+                report_prompt += f"\n\nLive Monitor Alerts ({len(live_alert_data)} triggered):\n"
+                for alert in live_alert_data:
+                    report_prompt += f"- [{alert['timestamp']}] Rule: {alert['rule']} -> {alert['response']}\n"
+                report_prompt += "\n"
+
             if not custom_prompt:
                 report_prompt += "Provide a concise overview of status and anomalies."
 
@@ -532,25 +594,42 @@ class PatrolService:
             parsed = parse_ai_response(response_obj)
 
             with db_context() as (conn, cursor):
-                cursor.execute(
-                    'UPDATE patrol_runs SET report_content = ?, token_usage = ? WHERE id = ?',
-                    (parsed['result_text'], parsed['usage_json'], self.current_run_id)
-                )
+                cursor.execute('''
+                    UPDATE patrol_runs
+                    SET report_content = ?, token_usage = ?,
+                        report_input_tokens = ?, report_output_tokens = ?, report_total_tokens = ?
+                    WHERE id = ?
+                ''', (parsed['result_text'], parsed['usage_json'],
+                      parsed['input_tokens'], parsed['output_tokens'], parsed['total_tokens'],
+                      self.current_run_id))
 
             logger.info("Report generated and saved.")
 
             # --- Telegram Notification ---
             if settings.get('enable_telegram', False):
-                telegram_message = self._generate_telegram_message(
+                telegram_message, tg_parsed = self._generate_telegram_message(
                     inspections_data, settings, video_analysis_text
                 )
+                # Save telegram token usage
+                with db_context() as (conn, cursor):
+                    cursor.execute('''
+                        UPDATE patrol_runs
+                        SET telegram_input_tokens = ?, telegram_output_tokens = ?, telegram_total_tokens = ?
+                        WHERE id = ?
+                    ''', (tg_parsed['input_tokens'], tg_parsed['output_tokens'],
+                          tg_parsed['total_tokens'], self.current_run_id))
                 self._send_telegram_notification(settings, telegram_message)
 
         except Exception as e:
             logger.error(f"Report Generation Error: {e}")
 
     def _generate_telegram_message(self, inspections_data, settings, video_analysis_text=None):
-        """Generate a concise Telegram message using AI."""
+        """Generate a concise Telegram message using AI.
+
+        Returns:
+            tuple: (message_text, parsed_response_dict)
+        """
+        empty_parsed = {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
         try:
             custom_prompt = settings.get('telegram_message_prompt', '').strip()
             if not custom_prompt:
@@ -565,10 +644,10 @@ class PatrolService:
 
             response_obj = ai_service.generate_report(prompt)
             parsed = parse_ai_response(response_obj)
-            return parsed['result_text']
+            return parsed['result_text'], parsed
         except Exception as e:
             logger.error(f"Telegram message generation failed: {e}")
-            return "Patrol completed. Failed to generate summary."
+            return "Patrol completed. Failed to generate summary.", empty_parsed
 
     def _send_telegram_notification(self, settings, message):
         """Send patrol report and PDF to Telegram."""

@@ -882,16 +882,16 @@ select option {
 
 .ai-result-row {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
+    align-items: stretch;
+    gap: 0;
 }
 
 .status-indicator {
-    width: 28px;
-    height: 28px;
+    min-width: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 10px 8px;
     font-family: var(--font-display);
     font-size: 10px;
     font-weight: 700;

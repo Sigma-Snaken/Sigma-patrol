@@ -45,6 +45,7 @@ Each robot runs its own Flask process. The backend handles:
 - PDF report generation
 - Telegram notifications
 - Video recording during patrols
+- Live camera monitoring via VILA Alert API during patrols
 
 ### Reverse Proxy (nginx)
 
@@ -104,8 +105,9 @@ data/
 │   │   ├── points.json        # Patrol waypoints
 │   │   └── patrol_schedule.json
 │   └── report/
-│       └── images/            # Inspection photos
-│           └── {run_id}_{timestamp}/
+│       ├── images/            # Inspection photos
+│       │   └── {run_id}_{timestamp}/
+│       └── live_alerts/       # Live monitor evidence images
 ├── robot-b/
 │   └── ...
 ```
@@ -125,6 +127,7 @@ Each Flask backend runs several background threads:
 | `_schedule_checker` (patrol_service) | Checks for scheduled patrol times | 30s |
 | `_inspection_worker` (patrol_service) | Processes AI inspection queue | Event-driven |
 | `_record_loop` (video_recorder) | Captures video frames during patrol | 1/fps |
+| `_monitor_loop` (live_monitor) | Sends frames to VILA Alert API during patrol | Configurable (default 5s) |
 
 ## Networking Modes
 

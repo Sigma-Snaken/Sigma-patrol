@@ -13,7 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     Image, KeepTogether, ListFlowable, ListItem, Preformatted
@@ -24,20 +24,64 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from config import ROBOT_IMAGES_DIR, _LEGACY_IMAGES_DIR, DATA_DIR
 from database import get_db_connection
 
-# Register CID font for Chinese support
-try:
-    pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
-    CJK_FONT = 'STSong-Light'
-except Exception as e:
-    logging.warning(f"Failed to register CJK font: {e}. Chinese may not display correctly.")
-    CJK_FONT = 'Helvetica'
+# === Font Registration ===
+# Try OTF fonts first (downloaded at Docker build time), fall back to CID fonts
 
-# Color scheme
-CYAN_COLOR = colors.HexColor('#00bcd4')
-OK_GREEN = colors.HexColor('#00e676')
-NG_RED = colors.HexColor('#ff3b30')
+FONTS_DIR = os.path.join(os.path.dirname(__file__), 'fonts')
+
+CJK_FONT = 'Helvetica'
+CJK_BOLD = 'Helvetica-Bold'
+MONO_FONT = 'Courier'
+
+try:
+    from reportlab.pdfbase.ttfonts import TTFont
+    regular_path = os.path.join(FONTS_DIR, 'NotoSansCJKtc-Regular.otf')
+    bold_path = os.path.join(FONTS_DIR, 'NotoSansCJKtc-Bold.otf')
+    mono_path = os.path.join(FONTS_DIR, 'IBMPlexMono-Regular.otf')
+
+    if os.path.exists(regular_path):
+        pdfmetrics.registerFont(TTFont('NotoSansCJK', regular_path))
+        CJK_FONT = 'NotoSansCJK'
+    if os.path.exists(bold_path):
+        pdfmetrics.registerFont(TTFont('NotoSansCJK-Bold', bold_path))
+        CJK_BOLD = 'NotoSansCJK-Bold'
+    else:
+        CJK_BOLD = CJK_FONT
+    if os.path.exists(mono_path):
+        pdfmetrics.registerFont(TTFont('IBMPlexMono', mono_path))
+        MONO_FONT = 'IBMPlexMono'
+except Exception as e:
+    logging.warning(f"OTF font registration failed: {e}, trying CID fallback")
+
+# CID fallback for environments without OTF files
+if CJK_FONT == 'Helvetica':
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+        CJK_FONT = 'STSong-Light'
+        CJK_BOLD = 'STSong-Light'
+    except Exception as e:
+        logging.warning(f"CID font fallback also failed: {e}. CJK text may not render.")
+
+# === Color Scheme (amber / teal) ===
+AMBER = colors.HexColor('#b8860b')
+TEAL = colors.HexColor('#008b72')
+OK_GREEN = colors.HexColor('#28a745')
+NG_RED = colors.HexColor('#dc3545')
 MUTED_TEXT = colors.HexColor('#888888')
 CODE_BG = colors.HexColor('#1a1f25')
+
+# === Logo ===
+_LOGO_CANDIDATES = [
+    os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'favicon.png'),
+    '/app/src/frontend/static/favicon.png',
+]
+
+def _find_logo():
+    for p in _LOGO_CANDIDATES:
+        abspath = os.path.abspath(p)
+        if os.path.exists(abspath):
+            return abspath
+    return None
 
 
 def get_styles():
@@ -47,22 +91,22 @@ def get_styles():
     # Base styles
     styles.add(ParagraphStyle(
         name='ReportTitle',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=24,
-        textColor=CYAN_COLOR,
+        textColor=AMBER,
         spaceAfter=12,
-        alignment=1
+        alignment=TA_CENTER
     ))
 
     styles.add(ParagraphStyle(
         name='SectionHeader',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=14,
-        textColor=CYAN_COLOR,
+        textColor=AMBER,
         spaceBefore=12,
         spaceAfter=8,
         borderWidth=1,
-        borderColor=CYAN_COLOR,
+        borderColor=AMBER,
         borderPadding=4
     ))
 
@@ -76,10 +120,20 @@ def get_styles():
     ))
 
     styles.add(ParagraphStyle(
-        name='PointName',
+        name='CJKNormalCenter',
         fontName=CJK_FONT,
+        fontSize=10,
+        textColor=colors.black,
+        spaceAfter=6,
+        leading=14,
+        alignment=TA_CENTER
+    ))
+
+    styles.add(ParagraphStyle(
+        name='PointName',
+        fontName=CJK_BOLD,
         fontSize=12,
-        textColor=CYAN_COLOR,
+        textColor=TEAL,
         spaceBefore=8,
         spaceAfter=4
     ))
@@ -94,9 +148,9 @@ def get_styles():
     # Markdown styles
     styles.add(ParagraphStyle(
         name='MDH1',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=16,
-        textColor=CYAN_COLOR,
+        textColor=AMBER,
         spaceBefore=14,
         spaceAfter=8,
         leading=20
@@ -104,9 +158,9 @@ def get_styles():
 
     styles.add(ParagraphStyle(
         name='MDH2',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=14,
-        textColor=CYAN_COLOR,
+        textColor=AMBER,
         spaceBefore=12,
         spaceAfter=6,
         leading=18
@@ -114,9 +168,9 @@ def get_styles():
 
     styles.add(ParagraphStyle(
         name='MDH3',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=12,
-        textColor=CYAN_COLOR,
+        textColor=AMBER,
         spaceBefore=10,
         spaceAfter=4,
         leading=16
@@ -124,9 +178,9 @@ def get_styles():
 
     styles.add(ParagraphStyle(
         name='MDH4',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=11,
-        textColor=colors.HexColor('#0099aa'),
+        textColor=TEAL,
         spaceBefore=8,
         spaceAfter=4,
         leading=14
@@ -149,7 +203,7 @@ def get_styles():
         textColor=MUTED_TEXT,
         leftIndent=15,
         borderLeftWidth=2,
-        borderLeftColor=CYAN_COLOR,
+        borderLeftColor=AMBER,
         borderLeftPadding=8,
         spaceBefore=6,
         spaceAfter=6,
@@ -158,7 +212,7 @@ def get_styles():
 
     styles.add(ParagraphStyle(
         name='MDCode',
-        fontName='Courier',
+        fontName=MONO_FONT,
         fontSize=9,
         textColor=colors.HexColor('#00f0ff'),
         backColor=CODE_BG,
@@ -185,10 +239,10 @@ def get_styles():
     # Table styles
     styles.add(ParagraphStyle(
         name='MDTableHeader',
-        fontName=CJK_FONT,
+        fontName=CJK_BOLD,
         fontSize=9,
         textColor=colors.white,
-        alignment=1,  # Center
+        alignment=TA_CENTER,
         leading=11,
         spaceBefore=0,
         spaceAfter=0
@@ -234,7 +288,8 @@ def convert_inline_markdown(text):
     text = re.sub(r'(?<![_])_([^_]+)_(?![_])', r'<i>\1</i>', text)
 
     # Inline code: `code`
-    text = re.sub(r'`([^`]+)`', r'<font face="Courier" color="#00f0ff">\1</font>', text)
+    teal_hex = TEAL.hexval()
+    text = re.sub(r'`([^`]+)`', rf'<font face="{MONO_FONT}" color="{teal_hex}">\1</font>', text)
 
     return text
 
@@ -267,14 +322,14 @@ def parse_markdown_table(lines, styles):
             # Use Header style for first row
             style = styles['MDTableHeader'] if len(data) == 0 else styles['MDTableCell']
             row_data.append(Paragraph(cell_text, style))
-            
+
             # Simple length tracking (strip tags for estimation)
             clean_text = part.strip()
             if j >= len(col_max_chars):
                 col_max_chars.append(len(clean_text))
             else:
                 col_max_chars[j] = max(col_max_chars[j], len(clean_text))
-        
+
         if row_data:
             data.append(row_data)
 
@@ -285,7 +340,7 @@ def parse_markdown_table(lines, styles):
     # Total available width = A4 width - margins (approx 170mm)
     total_width = 170 * mm
     num_cols = len(col_max_chars)
-    
+
     if num_cols == 0:
         return None
 
@@ -298,11 +353,11 @@ def parse_markdown_table(lines, styles):
         col_widths.append(w)
 
     table = Table(data, colWidths=col_widths)
-    
+
     # Style the table
     # Header row background
     tbl_style = [
-        ('BACKGROUND', (0, 0), (-1, 0), CYAN_COLOR),
+        ('BACKGROUND', (0, 0), (-1, 0), AMBER),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -312,9 +367,9 @@ def parse_markdown_table(lines, styles):
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
     ]
-    
+
     table.setStyle(TableStyle(tbl_style))
-    
+
     return table
 
 
@@ -346,7 +401,7 @@ def markdown_to_flowables(markdown_text, styles):
             while i < len(lines) and lines[i].strip().startswith('|'):
                 table_lines.append(lines[i].strip())
                 i += 1
-            
+
             table_flowable = parse_markdown_table(table_lines, styles)
             if table_flowable:
                 flowables.append(table_flowable)
@@ -414,7 +469,7 @@ def markdown_to_flowables(markdown_text, styles):
                 flowables.append(ListFlowable(
                     list_items,
                     bulletType='bullet',
-                    bulletColor=CYAN_COLOR,
+                    bulletColor=TEAL,
                     leftIndent=10
                 ))
             continue
@@ -436,7 +491,7 @@ def markdown_to_flowables(markdown_text, styles):
                 flowables.append(ListFlowable(
                     list_items,
                     bulletType='1',
-                    bulletColor=CYAN_COLOR,
+                    bulletColor=TEAL,
                     leftIndent=10
                 ))
             continue
@@ -486,6 +541,139 @@ def parse_inspection_result(response_str):
     return is_ng, description
 
 
+def _build_title_page(story, styles, title_text, subtitle_text=None):
+    """Build a title page with optional logo."""
+    story.append(Spacer(1, 20*mm))
+
+    # Logo
+    logo_path = _find_logo()
+    if logo_path:
+        try:
+            logo = Image(logo_path)
+            # Scale to ~15mm height, maintain aspect ratio
+            target_h = 15 * mm
+            scale = target_h / logo.drawHeight
+            logo.drawHeight = target_h
+            logo.drawWidth = logo.drawWidth * scale
+            logo.hAlign = 'CENTER'
+            story.append(logo)
+            story.append(Spacer(1, 8*mm))
+        except Exception as e:
+            logging.warning(f"Failed to load logo: {e}")
+            story.append(Spacer(1, 10*mm))
+    else:
+        story.append(Spacer(1, 10*mm))
+
+    story.append(Paragraph(title_text, styles['ReportTitle']))
+    if subtitle_text:
+        story.append(Paragraph(subtitle_text, styles['ReportTitle']))
+
+
+def _build_token_table(story, styles, run_dict, inspections):
+    """Build per-category token usage breakdown table."""
+    story.append(Paragraph("Token Usage Breakdown (Token \u4f7f\u7528\u660e\u7d30)", styles['SectionHeader']))
+
+    # Aggregate inspection tokens
+    insp_in = sum(ins.get('input_tokens', 0) or 0 for ins in inspections)
+    insp_out = sum(ins.get('output_tokens', 0) or 0 for ins in inspections)
+    insp_total = sum(ins.get('total_tokens', 0) or 0 for ins in inspections)
+
+    report_in = run_dict.get('report_input_tokens', 0) or 0
+    report_out = run_dict.get('report_output_tokens', 0) or 0
+    report_total = run_dict.get('report_total_tokens', 0) or 0
+
+    tg_in = run_dict.get('telegram_input_tokens', 0) or 0
+    tg_out = run_dict.get('telegram_output_tokens', 0) or 0
+    tg_total = run_dict.get('telegram_total_tokens', 0) or 0
+
+    vid_in = run_dict.get('video_input_tokens', 0) or 0
+    vid_out = run_dict.get('video_output_tokens', 0) or 0
+    vid_total = run_dict.get('video_total_tokens', 0) or 0
+
+    grand_in = insp_in + report_in + tg_in + vid_in
+    grand_out = insp_out + report_out + tg_out + vid_out
+    grand_total = insp_total + report_total + tg_total + vid_total
+
+    def _fmt(n):
+        return f"{n:,}"
+
+    header_style = styles['MDTableHeader']
+    cell_style = styles['MDTableCell']
+
+    # Build table data
+    table_data = [
+        [
+            Paragraph("Category (\u985e\u5225)", header_style),
+            Paragraph("Input Tokens", header_style),
+            Paragraph("Output Tokens", header_style),
+            Paragraph("Total Tokens", header_style),
+        ],
+        [
+            Paragraph("\u5f71\u50cf\u8fa8\u8b58 (Image Inspection)", cell_style),
+            Paragraph(_fmt(insp_in), cell_style),
+            Paragraph(_fmt(insp_out), cell_style),
+            Paragraph(_fmt(insp_total), cell_style),
+        ],
+        [
+            Paragraph("\u5831\u544a\u751f\u6210 (Report Generation)", cell_style),
+            Paragraph(_fmt(report_in), cell_style),
+            Paragraph(_fmt(report_out), cell_style),
+            Paragraph(_fmt(report_total), cell_style),
+        ],
+    ]
+
+    # Conditionally add telegram row
+    if tg_total > 0:
+        table_data.append([
+            Paragraph("Telegram \u751f\u6210", cell_style),
+            Paragraph(_fmt(tg_in), cell_style),
+            Paragraph(_fmt(tg_out), cell_style),
+            Paragraph(_fmt(tg_total), cell_style),
+        ])
+
+    # Conditionally add video row
+    if vid_total > 0:
+        table_data.append([
+            Paragraph("\u5f71\u7247\u5206\u6790 (Video Analysis)", cell_style),
+            Paragraph(_fmt(vid_in), cell_style),
+            Paragraph(_fmt(vid_out), cell_style),
+            Paragraph(_fmt(vid_total), cell_style),
+        ])
+
+    # Grand total row (bold)
+    bold_cell = ParagraphStyle('BoldCell', parent=cell_style, fontName=CJK_BOLD)
+    table_data.append([
+        Paragraph("<b>\u5408\u8a08 (Grand Total)</b>", bold_cell),
+        Paragraph(f"<b>{_fmt(grand_in)}</b>", bold_cell),
+        Paragraph(f"<b>{_fmt(grand_out)}</b>", bold_cell),
+        Paragraph(f"<b>{_fmt(grand_total)}</b>", bold_cell),
+    ])
+
+    col_widths = [55*mm, 38*mm, 38*mm, 38*mm]
+    token_table = Table(table_data, colWidths=col_widths)
+
+    last_row = len(table_data) - 1
+    tbl_style = [
+        ('BACKGROUND', (0, 0), (-1, 0), AMBER),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('FONTNAME', (0, 0), (-1, -1), CJK_FONT),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        # Bold total row with light amber background
+        ('BACKGROUND', (0, last_row), (-1, last_row), colors.HexColor('#fdf6e3')),
+        ('FONTNAME', (0, last_row), (-1, last_row), CJK_BOLD),
+        ('LINEABOVE', (0, last_row), (-1, last_row), 1, AMBER),
+    ]
+    token_table.setStyle(TableStyle(tbl_style))
+    story.append(token_table)
+    story.append(Spacer(1, 10*mm))
+
+
 def generate_analysis_report(content, start_date, end_date):
     """
     Generate PDF from markdown content for multi-day analysis report.
@@ -512,13 +700,11 @@ def generate_analysis_report(content, start_date, end_date):
     story = []
 
     # === Title Page ===
-    story.append(Spacer(1, 30*mm))
-    story.append(Paragraph("VISUAL PATROL", styles['ReportTitle']))
-    story.append(Paragraph("Analysis Report", styles['ReportTitle']))
+    _build_title_page(story, styles, "VISUAL PATROL", "Analysis Report")
     story.append(Spacer(1, 10*mm))
     story.append(Paragraph(
         f"Report Period: {start_date} to {end_date}",
-        styles['CJKNormal']
+        styles['CJKNormalCenter']
     ))
     story.append(Paragraph(
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -585,10 +771,9 @@ def generate_patrol_report(run_id):
     story = []
 
     # === Title Page ===
-    story.append(Spacer(1, 30*mm))
-    story.append(Paragraph("VISUAL PATROL REPORT", styles['ReportTitle']))
+    _build_title_page(story, styles, "VISUAL PATROL REPORT")
     story.append(Spacer(1, 10*mm))
-    story.append(Paragraph(f"Report #{run_id}", styles['CJKNormal']))
+    story.append(Paragraph(f"Report #{run_id}", styles['CJKNormalCenter']))
     story.append(Paragraph(
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         styles['SmallText']
@@ -598,13 +783,34 @@ def generate_patrol_report(run_id):
     # === Patrol Information ===
     story.append(Paragraph("Patrol Information", styles['SectionHeader']))
 
+    # Calculate duration
+    duration_str = 'N/A'
+    start_time_str = run_dict.get('start_time')
+    end_time_str = run_dict.get('end_time')
+    if start_time_str and end_time_str:
+        try:
+            fmt = '%Y-%m-%d %H:%M:%S'
+            start_dt = datetime.strptime(start_time_str, fmt)
+            end_dt = datetime.strptime(end_time_str, fmt)
+            delta = end_dt - start_dt
+            total_secs = int(delta.total_seconds())
+            mins, secs = divmod(total_secs, 60)
+            hours, mins = divmod(mins, 60)
+            if hours > 0:
+                duration_str = f"{hours}h {mins}m {secs}s"
+            elif mins > 0:
+                duration_str = f"{mins}m {secs}s"
+            else:
+                duration_str = f"{secs}s"
+        except (ValueError, TypeError):
+            pass
+
     info_data = [
-        ['Status:', run_dict.get('status', 'N/A')],
-        ['Start Time:', run_dict.get('start_time', 'N/A')],
-        ['End Time:', run_dict.get('end_time', 'N/A')],
+        ['Start Time:', start_time_str or 'N/A'],
+        ['End Time:', end_time_str or 'N/A'],
+        ['Duration:', duration_str],
         ['Robot Serial:', run_dict.get('robot_serial', 'N/A')],
         ['AI Model:', run_dict.get('model_id', 'N/A')],
-        ['Total Tokens:', str(run_dict.get('total_tokens', 0))],
     ]
 
     info_table = Table(info_data, colWidths=[35*mm, 120*mm])
@@ -621,6 +827,9 @@ def generate_patrol_report(run_id):
     story.append(info_table)
     story.append(Spacer(1, 10*mm))
 
+    # === Token Usage Breakdown ===
+    _build_token_table(story, styles, run_dict, inspections)
+
     # === AI Summary Report (Markdown) ===
     story.append(Paragraph("AI Summary Report", styles['SectionHeader']))
 
@@ -636,6 +845,10 @@ def generate_patrol_report(run_id):
     # === Inspection Points ===
     story.append(Paragraph(f"Inspection Points ({len(inspections)})", styles['SectionHeader']))
 
+    teal_hex = TEAL.hexval()
+    ok_hex = OK_GREEN.hexval()
+    ng_hex = NG_RED.hexval()
+
     if not inspections:
         story.append(Paragraph("No inspection records.", styles['CJKNormal']))
     else:
@@ -648,7 +861,7 @@ def generate_patrol_report(run_id):
 
             point_name = ins.get('point_name', 'Unknown Point')
             inspection_elements.append(Paragraph(
-                f"<font color='#00bcd4'>{escape_xml(point_name)}</font> "
+                f"<font color='{teal_hex}'>{escape_xml(point_name)}</font> "
                 f"<font color='{status_color.hexval()}'>[{status_text}]</font>",
                 styles['PointName']
             ))
@@ -695,7 +908,7 @@ def generate_patrol_report(run_id):
                 styles['CJKNormal']
             ))
 
-            result_color = '#ff3b30' if is_ng else '#00e676'
+            result_color = ng_hex if is_ng else ok_hex
             inspection_elements.append(Paragraph(
                 f"<font color='{result_color}'><b>Result:</b></font>",
                 styles['CJKNormal']

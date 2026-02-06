@@ -38,6 +38,15 @@ RUN mkdir -p /app/src/frontend/static/js && \
     curl -L https://cdn.jsdelivr.net/npm/chart.js -o /app/src/frontend/static/js/chart.min.js && \
     curl -L https://cdn.jsdelivr.net/npm/marked/marked.min.js -o /app/src/frontend/static/js/marked.min.js
 
+# Download fonts for PDF generation (CJK + monospace)
+RUN mkdir -p /app/src/backend/fonts && \
+    curl -L "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf" \
+         -o /app/src/backend/fonts/NotoSansCJKtc-Regular.otf && \
+    curl -L "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Bold.otf" \
+         -o /app/src/backend/fonts/NotoSansCJKtc-Bold.otf && \
+    curl -L "https://github.com/IBM/plex/raw/master/IBM-Plex-Mono/fonts/complete/otf/IBMPlexMono-Regular.otf" \
+         -o /app/src/backend/fonts/IBMPlexMono-Regular.otf
+
 # Set locale
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
