@@ -1,18 +1,51 @@
 # Deployment Guide
 
-## Quick Start
+## Prerequisites
+
+- Docker & Docker Compose
+- Network access to GitHub Container Registry (`ghcr.io`)
+
+## Fresh Install
+
+不需要 clone 整個 repo，只需要兩個設定檔：
 
 ```bash
-cd deploy
+# 建立部署目錄
+mkdir -p ~/visual-patrol && cd ~/visual-patrol
 
-# Pull and run
+# 下載設定檔
+curl -LO https://raw.githubusercontent.com/sigma-snaken/visual-patrol/main/deploy/docker-compose.prod.yaml
+curl -LO https://raw.githubusercontent.com/sigma-snaken/visual-patrol/main/deploy/nginx.conf
+
+# 修改機器人 IP 等設定
+vim docker-compose.prod.yaml
+
+# 啟動
+docker compose -f docker-compose.prod.yaml pull
 docker compose -f docker-compose.prod.yaml up -d
+```
 
+`data/` 和 `logs/` 目錄會在首次啟動時自動建立，不需要手動建立。
+
+## Update
+
+```bash
+cd ~/visual-patrol
+docker compose -f docker-compose.prod.yaml pull
+docker compose -f docker-compose.prod.yaml up -d
+```
+
+## Common Commands
+
+```bash
 # View logs
 docker compose -f docker-compose.prod.yaml logs -f
 
 # Stop
 docker compose -f docker-compose.prod.yaml down
+
+# Restart single service
+docker compose -f docker-compose.prod.yaml restart robot-a
 ```
 
 Open `http://localhost:5000`, go to **Settings** to configure your Gemini API Key.
@@ -78,3 +111,17 @@ docker pull ghcr.io/sigma-snaken/visual-patrol:latest
 - `latest` - Latest main branch
 - `main` - Main branch
 - `v1.0.0` - Semantic version tags
+
+## Directory Structure
+
+部署後的目錄結構：
+
+```
+~/visual-patrol/
+├── docker-compose.prod.yaml   # 服務定義（從 GHCR 拉 image）
+├── nginx.conf                 # nginx 路由設定
+├── data/                      # 自動產生 — DB、設定、巡檢圖片
+│   ├── report/report.db       #   共用 SQLite 資料庫
+│   └── robot-a/               #   每台機器人的資料
+└── logs/                      # 自動產生 — 應用程式 log
+```
