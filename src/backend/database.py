@@ -293,6 +293,7 @@ def init_db():
             image_path TEXT,
             timestamp TEXT,
             robot_id TEXT,
+            stream_source TEXT,
             FOREIGN KEY(run_id) REFERENCES patrol_runs(id)
         )
     ''')
@@ -318,6 +319,7 @@ def _run_migrations(cursor):
         ('robot_id', 'patrol_runs', ['robot_id TEXT']),
         ('robot_id', 'inspection_results', ['robot_id TEXT']),
         ('robot_id', 'generated_reports', ['robot_id TEXT']),
+        ('stream_source', 'live_alerts', ['stream_source TEXT']),
     ]
 
     for check_col, table, columns in migrations:

@@ -445,31 +445,58 @@
                         </div>
 
                         <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);"></div>
-                        <h3 class="settings-section-title">Live Monitor (VILA)</h3>
+                        <h3 class="settings-section-title">Live Monitor (VILA JPS)</h3>
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-enable-live-monitor" style="width: auto;">
                             <label for="setting-enable-live-monitor" style="margin: 0; cursor: pointer;">Enable Live Monitoring</label>
                         </div>
+
                         <div class="form-group">
-                            <label>VILA Server URL</label>
-                            <input type="text" id="setting-vila-server-url" placeholder="http://192.168.50.35:9000">
+                            <label>Stream Sources</label>
+                            <div style="display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-secondary);">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" id="setting-enable-robot-camera-relay" style="width: auto;">
+                                    <label for="setting-enable-robot-camera-relay" style="margin: 0; cursor: pointer; font-size: 13px;">Robot Camera Relay</label>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" id="setting-enable-external-rtsp" style="width: auto;">
+                                    <label for="setting-enable-external-rtsp" style="margin: 0; cursor: pointer; font-size: 13px;">External RTSP</label>
+                                </div>
+                                <input type="text" id="setting-external-rtsp-url" placeholder="rtsp://admin:pass@192.168.50.45:554/live" style="font-size: 12px;">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>VILA JPS URL</label>
+                            <input type="text" id="setting-vila-jps-url" placeholder="http://localhost:5010">
                         </div>
                         <div class="form-group">
-                            <label>VILA Model</label>
-                            <input type="text" id="setting-vila-model" placeholder="VILA1.5-3B" value="VILA1.5-3B">
-                        </div>
-                        <div class="form-group">
-                            <label>VILA Alert URL</label>
-                            <input type="text" id="setting-vila-alert-url" placeholder="http://192.168.50.35:9000">
-                        </div>
-                        <div class="form-group">
-                            <label>Check Interval (seconds)</label>
-                            <input type="number" id="setting-live-monitor-interval" min="2" max="30" value="5">
-                        </div>
-                        <div class="form-group">
-                            <label>Alert Rules <span style="font-size:11px;color:var(--text-muted)">(one per line)</span></label>
+                            <label>Alert Rules <span style="font-size:11px;color:var(--text-muted)">(max 10, one per line)</span></label>
                             <textarea id="setting-live-monitor-rules" rows="4" placeholder="Is there a person fallen on the ground?&#10;Is there a fire or smoke visible?&#10;Is the emergency exit blocked?"></textarea>
                         </div>
+
+                        <details style="margin-top: 4px;">
+                            <summary style="cursor: pointer; font-size: 12px; color: var(--text-muted); user-select: none;">Legacy / Test Settings</summary>
+                            <div style="padding: 8px 0;">
+                                <div class="form-group">
+                                    <label>VILA Server URL</label>
+                                    <input type="text" id="setting-vila-server-url" placeholder="http://192.168.50.35:9000">
+                                </div>
+                                <div class="form-group">
+                                    <label>VILA Model</label>
+                                    <input type="text" id="setting-vila-model" placeholder="VILA1.5-3B" value="VILA1.5-3B">
+                                </div>
+                                <div class="form-group">
+                                    <label>VILA Alert URL</label>
+                                    <input type="text" id="setting-vila-alert-url" placeholder="http://192.168.50.35:9000">
+                                </div>
+                                <div class="form-group">
+                                    <label>Check Interval (seconds)</label>
+                                    <input type="number" id="setting-live-monitor-interval" min="2" max="30" value="5">
+                                </div>
+                            </div>
+                        </details>
+
                         <div class="form-group" style="margin-top: 8px;">
                             <button id="btn-test-live-monitor" class="btn" onclick="testLiveMonitor()">Test Live Monitor</button>
                             <span id="live-monitor-test-status" style="margin-left: 8px; font-size: 12px; color: var(--text-muted);"></span>

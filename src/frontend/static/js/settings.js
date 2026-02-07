@@ -68,6 +68,19 @@ export async function loadSettings() {
         liveMonitorRules.value = Array.isArray(rules) ? rules.join('\n') : '';
     }
 
+    // VILA JPS / Relay settings
+    const vilaJpsUrl = document.getElementById('setting-vila-jps-url');
+    if (vilaJpsUrl) vilaJpsUrl.value = data.vila_jps_url || '';
+
+    const robotCameraRelay = document.getElementById('setting-enable-robot-camera-relay');
+    if (robotCameraRelay) robotCameraRelay.checked = data.enable_robot_camera_relay === true;
+
+    const externalRtsp = document.getElementById('setting-enable-external-rtsp');
+    if (externalRtsp) externalRtsp.checked = data.enable_external_rtsp === true;
+
+    const externalRtspUrl = document.getElementById('setting-external-rtsp-url');
+    if (externalRtspUrl) externalRtspUrl.value = data.external_rtsp_url || '';
+
     // Load registered robots list
     loadRobotsList();
 }
@@ -126,6 +139,10 @@ async function saveSettings() {
         live_monitor_interval: parseInt(document.getElementById('setting-live-monitor-interval')?.value || '5', 10),
         live_monitor_rules: (document.getElementById('setting-live-monitor-rules')?.value || '')
             .split('\n').map(s => s.trim()).filter(s => s.length > 0),
+        vila_jps_url: document.getElementById('setting-vila-jps-url')?.value || '',
+        enable_robot_camera_relay: document.getElementById('setting-enable-robot-camera-relay')?.checked || false,
+        enable_external_rtsp: document.getElementById('setting-enable-external-rtsp')?.checked || false,
+        external_rtsp_url: document.getElementById('setting-external-rtsp-url')?.value || '',
     };
     try {
         const res = await fetch('/api/settings', {
@@ -231,14 +248,19 @@ export async function testLiveMonitor() {
             const newResults = status.results.filter(r => r.check_id > lastCheckCount);
             for (const entry of newResults) {
                 const lines = entry.responses.map(r => {
-                    const isYes = ['yes', 'true', '1'].includes(r.answer.toLowerCase());
+                    const a = r.answer.toLowerCase();
+                    const isYes = a.startsWith('yes') || a.startsWith('true') || a.startsWith('1');
                     const label = isYes ? 'YES' : 'NO';
                     const color = isYes ? 'var(--coral, #e74c3c)' : 'var(--green, #2ecc71)';
                     return `<span style="color:${color}; font-weight:600;">[${label}]</span> ${escapeHtml(r.rule)}`;
                 }).join('<br>');
-                resultsEl.innerHTML += `<div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border-subtle);">` +
-                    `<div style="color:var(--text-muted); margin-bottom:2px;">#${entry.check_id} — ${escapeHtml(entry.timestamp)}</div>` +
-                    `${lines}</div>`;
+                const imgHtml = entry.image
+                    ? `<img src="${entry.image}" style="max-width:160px; border-radius:4px; margin-top:4px; display:block;">`
+                    : '';
+                resultsEl.innerHTML += `<div style="margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border-subtle); display:flex; gap:10px; align-items:flex-start;">` +
+                    `${imgHtml}` +
+                    `<div><div style="color:var(--text-muted); margin-bottom:2px;">#${entry.check_id} — ${escapeHtml(entry.timestamp)}</div>` +
+                    `${lines}</div></div>`;
                 lastCheckCount = entry.check_id;
             }
 

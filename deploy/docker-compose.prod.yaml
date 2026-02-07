@@ -7,6 +7,12 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: visual_patrol_mediamtx
+    network_mode: host
+    restart: unless-stopped
+
   robot-a:
     container_name: visual_patrol_robot_a
     image: ghcr.io/sigma-snaken/visual-patrol:latest
@@ -22,6 +28,8 @@ services:
       - ROBOT_ID=robot-a
       - ROBOT_NAME=Robot A
       - ROBOT_IP=192.168.50.133:26400
+      - MEDIAMTX_INTERNAL=localhost:8554
+      - MEDIAMTX_EXTERNAL=localhost:8554
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/state')"]

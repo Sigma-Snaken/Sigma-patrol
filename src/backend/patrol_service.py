@@ -11,7 +11,7 @@ import io
 from datetime import datetime
 from PIL import Image
 
-from config import ROBOT_ID, ROBOT_IMAGES_DIR, ROBOT_DATA_DIR, POINTS_FILE, SCHEDULE_FILE
+from config import ROBOT_ID, ROBOT_NAME, ROBOT_IMAGES_DIR, ROBOT_DATA_DIR, POINTS_FILE, SCHEDULE_FILE
 import settings_service
 import requests
 from utils import load_json, save_json, get_current_time_str, get_filename_timestamp
@@ -344,26 +344,61 @@ class PatrolService:
             recorder = VideoRecorder(video_filename, robot_service.get_front_camera_image)
             recorder.start()
 
-        # Live monitor setup
+        # Live monitor setup (VILA JPS API + RTSP relay)
         from live_monitor import live_monitor
+        from relay_manager import relay_manager
+        from config import MEDIAMTX_INTERNAL, MEDIAMTX_EXTERNAL
         live_monitor_active = False
-        if settings.get("enable_live_monitor") and settings.get("vila_alert_url"):
+
+        tg_config = None
+        if settings.get("enable_telegram"):
+            tg_token = settings.get("telegram_bot_token", "")
+            tg_user = settings.get("telegram_user_id", "")
+            if tg_token and tg_user:
+                tg_config = {"bot_token": tg_token, "user_id": tg_user}
+
+        if settings.get("enable_live_monitor") and settings.get("vila_jps_url"):
+            streams = []
+
+            if settings.get("enable_robot_camera_relay"):
+                try:
+                    rtsp_path = relay_manager.start_robot_camera_relay(
+                        ROBOT_ID, robot_service.get_front_camera_image, MEDIAMTX_INTERNAL)
+                    streams.append({
+                        "rtsp_url": f"rtsp://{MEDIAMTX_EXTERNAL}{rtsp_path}",
+                        "name": f"{ROBOT_NAME} Camera",
+                        "type": "robot_camera",
+                        "evidence_func": robot_service.get_front_camera_image,
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to start robot camera relay: {e}")
+
+            ext_url = settings.get("external_rtsp_url", "")
+            if settings.get("enable_external_rtsp") and ext_url:
+                try:
+                    rtsp_path = relay_manager.start_external_rtsp_relay(
+                        ROBOT_ID, ext_url, MEDIAMTX_INTERNAL)
+                    streams.append({
+                        "rtsp_url": f"rtsp://{MEDIAMTX_EXTERNAL}{rtsp_path}",
+                        "name": "External Camera",
+                        "type": "external_rtsp",
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to start external RTSP relay: {e}")
+
+            # Wait for streams to establish
+            if streams:
+                time.sleep(3)
+
             rules = settings.get("live_monitor_rules", [])
-            if rules:
-                tg_config = None
-                if settings.get("enable_telegram"):
-                    tg_token = settings.get("telegram_bot_token", "")
-                    tg_user = settings.get("telegram_user_id", "")
-                    if tg_token and tg_user:
-                        tg_config = {"bot_token": tg_token, "user_id": tg_user}
-                live_monitor.start(
-                    self.current_run_id,
-                    rules,
-                    settings["vila_alert_url"],
-                    robot_service.get_front_camera_image,
-                    settings.get("live_monitor_interval", 5),
-                    telegram_config=tg_config,
-                )
+            if streams and rules:
+                live_monitor.start(self.current_run_id, {
+                    "vila_jps_url": settings["vila_jps_url"],
+                    "streams": streams,
+                    "rules": rules,
+                    "telegram_config": tg_config,
+                    "mediamtx_external": MEDIAMTX_EXTERNAL,
+                })
                 live_monitor_active = True
 
         inspections_data = []
@@ -413,6 +448,11 @@ class PatrolService:
                     live_monitor.stop()
                 except Exception as e:
                     logger.error(f"Error stopping live monitor: {e}")
+            # Ensure RTSP relays are always stopped
+            try:
+                relay_manager.stop_all()
+            except Exception as e:
+                logger.error(f"Error stopping relays: {e}")
             # Ensure video recorder is always stopped
             if recorder:
                 try:

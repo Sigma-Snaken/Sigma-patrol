@@ -6,6 +6,10 @@ ROBOT_ID = os.getenv("ROBOT_ID", "default")
 ROBOT_NAME = os.getenv("ROBOT_NAME", "Robot")
 ROBOT_IP = os.getenv("ROBOT_IP", "192.168.50.133:26400")
 
+# mediamtx RTSP relay
+MEDIAMTX_INTERNAL = os.getenv("MEDIAMTX_INTERNAL", "localhost:8554")
+MEDIAMTX_EXTERNAL = os.getenv("MEDIAMTX_EXTERNAL", "localhost:8554")
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
@@ -72,6 +76,11 @@ DEFAULT_SETTINGS = {
     "enable_live_monitor": False,
     "live_monitor_interval": 5,
     "live_monitor_rules": [],
+
+    "vila_jps_url": "",
+    "enable_robot_camera_relay": False,
+    "enable_external_rtsp": False,
+    "external_rtsp_url": "",
 }
 
 

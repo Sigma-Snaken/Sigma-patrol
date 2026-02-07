@@ -1,14 +1,20 @@
 """
-Live Monitor - Background camera monitoring via VILA Alert API during patrol.
-Continuously sends camera frames to VILA Alert API with configurable alert rules.
+Live Monitor - Background camera monitoring via VILA JPS Alert API during patrol.
+
+Uses VILA JPS Stream API + Alert API + WebSocket for efficient continuous monitoring.
+The legacy chat-completions approach is retained for TestLiveMonitor (settings page quick test).
 """
 
+import base64
+import json
+import os
 import threading
 import time
-import base64
-import os
+from urllib.parse import urlparse
 
+import cv2
 import requests
+import websocket
 
 from config import ROBOT_ID, ROBOT_DATA_DIR
 from database import db_context
@@ -17,94 +23,188 @@ from utils import get_current_time_str
 
 logger = get_logger("live_monitor", "live_monitor.log")
 
-def _call_vila_chat(vila_url, data_url, rules, timeout=30):
+_VALID_RESPONSES = {"yes", "no", "0", "1", "true", "false"}
+
+ALERT_SYSTEM_PROMPT = (
+    "You are an AI assistant whose job is to evaluate a yes/no question on an image. "
+    "Your response must be accurate and based on the image and MUST be 'yes' or 'no'. "
+    "Do not respond with any numbers."
+)
+
+MAX_RULES = 10
+WS_PORT = 5016
+WS_RECONNECT_DELAY = 5
+WS_MAX_RECONNECTS = 10
+
+
+def _call_vila_chat(vila_url, data_url, rules, timeout=30, max_retries=1):
     """Call VILA chat completions once per rule (OpenAI-compatible).
 
-    Sends one request per rule for reliable yes/no answers from small VLMs.
+    Uses NVIDIA-recommended settings: max_tokens=1, min_tokens=1, system prompt,
+    and retry logic for non-boolean responses.
     Returns list of answer strings, one per rule.
     """
     url = f"{vila_url}/v1/chat/completions"
     answers = []
 
     for rule in rules:
-        question = rule
-        messages = []
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": data_url}},
-                {"type": "text", "text": question},
-            ],
-        })
-        body = {
-            "messages": messages,
-            "max_tokens": 16,
-        }
+        answer = ""
+        for attempt in range(max_retries + 1):
+            messages = [
+                {"role": "system", "content": ALERT_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                        {"type": "text", "text": rule},
+                    ],
+                },
+            ]
+            body = {
+                "messages": messages,
+                "max_tokens": 1,
+                "min_tokens": 1,
+            }
 
-        try:
-            resp = requests.post(url, json=body, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            answers.append(content.strip().rstrip(".").strip())
-        except Exception as e:
-            logger.error(f"VILA chat error for rule '{rule}': {e}")
-            answers.append("")
+            try:
+                resp = requests.post(url, json=body, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                answer = content.strip().rstrip(".").strip()
+
+                if answer.lower() in _VALID_RESPONSES:
+                    break
+                logger.warning(f"VILA non-boolean response '{answer}' for rule '{rule}', retry {attempt + 1}")
+            except Exception as e:
+                logger.error(f"VILA chat error for rule '{rule}': {e}")
+                answer = ""
+                break
+
+        answers.append(answer)
 
     return answers
 
 
 class LiveMonitor:
-    """Background monitor: sends camera frames to VILA Alert API during patrol."""
+    """Background monitor using VILA JPS API: stream registration, alert rules, WebSocket events."""
 
     def __init__(self):
         self.is_monitoring = False
-        self.monitor_thread = None
-        self.check_interval = 5.0
-        self.alert_rules = []
         self.current_run_id = None
         self.alerts = []
-        self.alert_cooldowns = {}  # {rule: last_trigger_timestamp}
+        self.alert_cooldowns = {}  # {rule_string: last_trigger_timestamp}
         self.cooldown_seconds = 60
         self._lock = threading.Lock()
 
-    def start(self, run_id, alert_rules, vila_alert_url, frame_func, check_interval=5.0,
-              telegram_config=None):
-        """Start background monitoring.
+        # JPS state
+        self._stream_ids = []  # list of (stream_id, stream_config)
+        self._ws_thread = None
+        self._ws = None
+        self._ws_stop = threading.Event()
+        self._config = None
+
+    def start(self, run_id, config):
+        """Start live monitoring with VILA JPS API.
 
         Args:
             run_id: Current patrol run ID.
-            alert_rules: List of alert rule strings (questions).
-            vila_alert_url: VILA alert endpoint base URL.
-            frame_func: Callable returning camera image (gRPC response with .data).
-            check_interval: Seconds between checks.
-            telegram_config: Optional dict with keys: bot_token, user_id. If provided, alerts are sent to Telegram.
+            config: dict with keys:
+                vila_jps_url: str - VILA JPS base URL (e.g. "http://localhost:5010")
+                streams: list of dicts, each with:
+                    rtsp_url: str - full RTSP URL for VILA to pull
+                    name: str - human-readable name
+                    type: str - "robot_camera" or "external_rtsp"
+                    evidence_func: callable (optional) - returns gRPC image for evidence capture
+                rules: list of str - alert rule strings
+                telegram_config: dict or None - {bot_token, user_id}
+                mediamtx_external: str - mediamtx host:port for evidence capture
         """
         if self.is_monitoring:
             return
 
         self.current_run_id = run_id
-        self.alert_rules = list(alert_rules)
-        self.vila_alert_url = vila_alert_url.rstrip("/")
-        self.frame_func = frame_func
-        self.check_interval = check_interval
-        self.telegram_config = telegram_config
+        self._config = config
         self.alerts = []
         self.alert_cooldowns = {}
+        self._stream_ids = []
+        self._ws_stop.clear()
 
+        vila_jps_url = config["vila_jps_url"].rstrip("/")
+        streams = config.get("streams", [])
+        rules = config.get("rules", [])
+
+        if not streams or not rules:
+            logger.warning("LiveMonitor: no streams or no rules, skipping")
+            return
+
+        # Truncate rules to max
+        if len(rules) > MAX_RULES:
+            logger.warning(f"Truncating rules from {len(rules)} to {MAX_RULES}")
+            rules = rules[:MAX_RULES]
+
+        # 1. Register each stream
+        for stream in streams:
+            try:
+                stream_id = self._register_stream(vila_jps_url, stream["rtsp_url"], stream["name"])
+                if stream_id:
+                    self._stream_ids.append((stream_id, stream))
+                    logger.info(f"Registered stream: {stream['name']} -> stream_id={stream_id}")
+                else:
+                    logger.error(f"Failed to register stream: {stream['name']}")
+            except Exception as e:
+                logger.error(f"Error registering stream {stream['name']}: {e}")
+
+        if not self._stream_ids:
+            logger.error("No streams registered, aborting LiveMonitor start")
+            return
+
+        # 2. Set alert rules per stream
+        for stream_id, stream in self._stream_ids:
+            try:
+                self._set_alert_rules(vila_jps_url, stream_id, rules)
+                logger.info(f"Set {len(rules)} alert rules for stream {stream_id}")
+            except Exception as e:
+                logger.error(f"Error setting alert rules for stream {stream_id}: {e}")
+
+        # 3. Start WebSocket listener
         self.is_monitoring = True
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
-        logger.info(f"LiveMonitor started for run {run_id} with {len(alert_rules)} rules, interval={check_interval}s")
+        self._ws_thread = threading.Thread(target=self._ws_listener, daemon=True)
+        self._ws_thread.start()
+
+        logger.info(f"LiveMonitor started for run {run_id}: {len(self._stream_ids)} streams, {len(rules)} rules")
 
     def stop(self):
-        """Stop background monitoring."""
+        """Stop monitoring: close WebSocket, deregister streams."""
         if not self.is_monitoring:
             return
+
         self.is_monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=10)
-            self.monitor_thread = None
+        self._ws_stop.set()
+
+        # Close WebSocket
+        if self._ws:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+        if self._ws_thread:
+            self._ws_thread.join(timeout=10)
+            self._ws_thread = None
+
+        # Deregister streams
+        if self._config:
+            vila_jps_url = self._config["vila_jps_url"].rstrip("/")
+            for stream_id, _ in self._stream_ids:
+                try:
+                    self._deregister_stream(vila_jps_url, stream_id)
+                    logger.info(f"Deregistered stream: {stream_id}")
+                except Exception as e:
+                    logger.warning(f"Error deregistering stream {stream_id}: {e}")
+
+        self._stream_ids = []
         logger.info(f"LiveMonitor stopped. Total alerts: {len(self.alerts)}")
 
     def get_alerts(self):
@@ -112,114 +212,207 @@ class LiveMonitor:
         with self._lock:
             return list(self.alerts)
 
-    def _monitor_loop(self):
-        """Main monitoring loop running in background thread."""
-        # Ensure evidence image directory exists
+    # --- VILA JPS API ---
+
+    def _register_stream(self, vila_jps_url, rtsp_url, name):
+        """POST /api/v1/live-stream to register a stream. Returns stream_id or None."""
+        url = f"{vila_jps_url}/api/v1/live-stream"
+        body = {"url": rtsp_url, "name": name}
+        resp = requests.post(url, json=body, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("id") or data.get("stream_id")
+
+    def _set_alert_rules(self, vila_jps_url, stream_id, rules):
+        """POST /api/v1/alerts to set alert rules for a stream."""
+        url = f"{vila_jps_url}/api/v1/alerts"
+        body = {"alerts": rules, "id": stream_id}
+        resp = requests.post(url, json=body, timeout=15)
+        resp.raise_for_status()
+
+    def _deregister_stream(self, vila_jps_url, stream_id):
+        """DELETE /api/v1/live-stream/{stream_id}."""
+        url = f"{vila_jps_url}/api/v1/live-stream/{stream_id}"
+        resp = requests.delete(url, timeout=10)
+        resp.raise_for_status()
+
+    # --- WebSocket Listener ---
+
+    def _ws_listener(self):
+        """Connect to VILA JPS WebSocket and listen for alert events."""
+        vila_jps_url = self._config["vila_jps_url"].rstrip("/")
+        parsed = urlparse(vila_jps_url)
+        ws_host = parsed.hostname
+        ws_url = f"ws://{ws_host}:{WS_PORT}/api/v1/alerts/ws"
+
         evidence_dir = os.path.join(ROBOT_DATA_DIR, "report", "live_alerts")
         os.makedirs(evidence_dir, exist_ok=True)
 
-        while self.is_monitoring:
-            start_time = time.time()
+        reconnect_count = 0
 
+        while not self._ws_stop.is_set() and reconnect_count < WS_MAX_RECONNECTS:
             try:
-                self._check_once(evidence_dir)
+                logger.info(f"Connecting to VILA WS: {ws_url}")
+                self._ws = websocket.WebSocket()
+                self._ws.settimeout(5)
+                self._ws.connect(ws_url)
+                logger.info("VILA WebSocket connected")
+                reconnect_count = 0  # Reset on successful connect
+
+                while not self._ws_stop.is_set():
+                    try:
+                        raw = self._ws.recv()
+                        if not raw:
+                            continue
+                        self._handle_ws_event(raw, evidence_dir)
+                    except websocket.WebSocketTimeoutException:
+                        continue
+                    except websocket.WebSocketConnectionClosedException:
+                        logger.warning("VILA WebSocket closed by server")
+                        break
+
             except Exception as e:
-                logger.error(f"LiveMonitor check error: {e}")
+                if self._ws_stop.is_set():
+                    break
+                reconnect_count += 1
+                logger.warning(f"VILA WS error (attempt {reconnect_count}/{WS_MAX_RECONNECTS}): {e}")
+                self._ws_stop.wait(WS_RECONNECT_DELAY)
 
-            elapsed = time.time() - start_time
-            sleep_time = max(0, self.check_interval - elapsed)
-            # Sleep in small increments so we can stop quickly
-            end_sleep = time.time() + sleep_time
-            while time.time() < end_sleep and self.is_monitoring:
-                time.sleep(0.5)
+        if reconnect_count >= WS_MAX_RECONNECTS:
+            logger.error("VILA WebSocket max reconnects exceeded")
 
-    def _check_once(self, evidence_dir):
-        """Capture frame, call VILA chat completions, process results."""
-        # 1. Get camera frame
-        img_response = self.frame_func()
-        if not img_response or not img_response.data:
+    def _handle_ws_event(self, raw, evidence_dir):
+        """Process a single WebSocket alert event."""
+        try:
+            event = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.debug(f"Non-JSON WS message: {raw[:200]}")
             return
 
-        jpeg_bytes = img_response.data
+        rule_string = event.get("rule_string") or event.get("alert") or event.get("rule", "")
+        stream_id = event.get("stream_id") or event.get("id", "")
+        alert_id = event.get("alert_id", "")
 
-        # 2. Base64 encode
-        b64 = base64.b64encode(jpeg_bytes).decode()
-        data_url = f"data:image/jpeg;base64,{b64}"
+        if not rule_string:
+            return
 
-        # 3. Call VILA chat completions
-        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.alert_rules)
-
-        # 4. Process each rule's response
-        now = time.time()
-        timestamp = get_current_time_str()
-
-        for i, response_text in enumerate(alert_responses):
-            if i >= len(self.alert_rules):
+        # Find the stream config for this stream_id
+        stream_config = None
+        for sid, sc in self._stream_ids:
+            if sid == stream_id:
+                stream_config = sc
                 break
 
-            rule = self.alert_rules[i]
-            answer = response_text.strip().lower()
-            triggered = answer in ("yes", "true", "1")
+        stream_type = stream_config.get("type", "unknown") if stream_config else "unknown"
+        stream_name = stream_config.get("name", "Unknown") if stream_config else "Unknown"
 
-            if not triggered:
-                continue
+        # Cooldown check (defense-in-depth; VILA also has 60s cooldown)
+        now = time.time()
+        cooldown_key = f"{stream_id}:{rule_string}"
+        last_trigger = self.alert_cooldowns.get(cooldown_key, 0)
+        if now - last_trigger < self.cooldown_seconds:
+            return
+        self.alert_cooldowns[cooldown_key] = now
 
-            # Cooldown check
-            last_trigger = self.alert_cooldowns.get(rule, 0)
-            if now - last_trigger < self.cooldown_seconds:
-                continue
+        timestamp = get_current_time_str()
+        logger.warning(f"ALERT: stream={stream_name} rule='{rule_string}' alert_id={alert_id}")
 
-            self.alert_cooldowns[rule] = now
+        # Capture evidence frame
+        jpeg_bytes = self._capture_evidence(stream_config)
 
-            # Save evidence image
-            safe_rule = rule[:40].replace("/", "_").replace("\\", "_").replace(" ", "_")
+        # Save evidence image
+        img_path = ""
+        rel_img_path = ""
+        if jpeg_bytes:
+            safe_rule = rule_string[:40].replace("/", "_").replace("\\", "_").replace(" ", "_")
             img_filename = f"{self.current_run_id}_{int(now)}_{safe_rule}.jpg"
             img_path = os.path.join(evidence_dir, img_filename)
             try:
                 with open(img_path, "wb") as f:
                     f.write(jpeg_bytes)
+                rel_img_path = os.path.relpath(img_path, ROBOT_DATA_DIR)
             except Exception as e:
                 logger.error(f"Failed to save evidence image: {e}")
                 img_path = ""
 
-            # Relative path for DB
-            rel_img_path = os.path.relpath(img_path, ROBOT_DATA_DIR) if img_path else ""
+        # Save to DB
+        try:
+            with db_context() as (conn, cursor):
+                cursor.execute('''
+                    INSERT INTO live_alerts (run_id, rule, response, image_path, timestamp, robot_id, stream_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (self.current_run_id, rule_string, "triggered", rel_img_path,
+                      timestamp, ROBOT_ID, stream_type))
+        except Exception as e:
+            logger.error(f"Failed to save live alert to DB: {e}")
 
-            # Save to DB
-            try:
-                with db_context() as (conn, cursor):
-                    cursor.execute('''
-                        INSERT INTO live_alerts (run_id, rule, response, image_path, timestamp, robot_id)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (self.current_run_id, rule, response_text.strip(), rel_img_path, timestamp, ROBOT_ID))
-            except Exception as e:
-                logger.error(f"Failed to save live alert to DB: {e}")
+        alert_entry = {
+            "rule": rule_string,
+            "response": "triggered",
+            "image_path": rel_img_path,
+            "timestamp": timestamp,
+            "stream_source": stream_type,
+            "stream_name": stream_name,
+        }
 
-            alert_entry = {
-                "rule": rule,
-                "response": response_text.strip(),
-                "image_path": rel_img_path,
-                "timestamp": timestamp,
-            }
+        with self._lock:
+            self.alerts.append(alert_entry)
 
-            with self._lock:
-                self.alerts.append(alert_entry)
+        # Send to Telegram
+        tg_config = self._config.get("telegram_config") if self._config else None
+        if tg_config and jpeg_bytes:
+            self._send_telegram_alert(rule_string, stream_name, timestamp, jpeg_bytes, tg_config)
 
-            logger.warning(f"ALERT triggered: rule='{rule}' response='{response_text.strip()}'")
+    def _capture_evidence(self, stream_config):
+        """Capture a JPEG evidence frame from the appropriate source."""
+        if not stream_config:
+            return None
 
-            # Send to Telegram
-            if self.telegram_config and img_path:
-                self._send_telegram_alert(rule, timestamp, jpeg_bytes)
+        stream_type = stream_config.get("type", "")
 
-    def _send_telegram_alert(self, rule, timestamp, jpeg_bytes):
+        # Robot camera: use gRPC frame_func for best quality
+        if stream_type == "robot_camera":
+            evidence_func = stream_config.get("evidence_func")
+            if evidence_func:
+                try:
+                    img = evidence_func()
+                    if img and img.data:
+                        return img.data
+                except Exception as e:
+                    logger.error(f"Evidence capture via gRPC failed: {e}")
+
+        # External RTSP: capture from the relay RTSP URL
+        if stream_type == "external_rtsp":
+            mediamtx_ext = self._config.get("mediamtx_external", "localhost:8554") if self._config else None
+            rtsp_url = stream_config.get("rtsp_url", "")
+            if rtsp_url and mediamtx_ext:
+                try:
+                    cap = cv2.VideoCapture(rtsp_url)
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret and frame is not None:
+                        _, buf = cv2.imencode('.jpg', frame)
+                        return buf.tobytes()
+                except Exception as e:
+                    logger.error(f"Evidence capture via RTSP failed: {e}")
+
+        return None
+
+    def _send_telegram_alert(self, rule, stream_name, timestamp, jpeg_bytes, tg_config):
         """Send alert photo + caption to Telegram."""
-        bot_token = self.telegram_config.get("bot_token")
-        user_id = self.telegram_config.get("user_id")
+        bot_token = tg_config.get("bot_token")
+        user_id = tg_config.get("user_id")
         if not bot_token or not user_id:
             return
 
         try:
-            caption = f"⚠️ Live Monitor Alert\n\nRule: {rule}\nRobot: {ROBOT_ID}\nTime: {timestamp}"
+            caption = (
+                f"⚠️ Live Monitor Alert\n\n"
+                f"Rule: {rule}\n"
+                f"Source: {stream_name}\n"
+                f"Robot: {ROBOT_ID}\n"
+                f"Time: {timestamp}"
+            )
             url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
             files = {"photo": (f"alert_{int(time.time())}.jpg", jpeg_bytes, "image/jpeg")}
             data = {"chat_id": user_id, "caption": caption}
@@ -234,6 +427,8 @@ class LiveMonitor:
 
 live_monitor = LiveMonitor()
 
+
+# === Legacy Test Monitor (settings page quick test via chat completions) ===
 
 class TestLiveMonitor:
     """Lightweight test monitor for settings page - no DB writes, keeps results in memory."""
@@ -314,6 +509,7 @@ class TestLiveMonitor:
         entry = {
             "check_id": self.check_count,
             "timestamp": timestamp,
+            "image": data_url,
             "responses": [],
         }
         for i, response_text in enumerate(alert_responses):

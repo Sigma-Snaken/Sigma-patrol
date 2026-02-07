@@ -32,6 +32,7 @@ from robot_service import robot_service
 from patrol_service import patrol_service
 from ai_service import ai_service
 from live_monitor import test_live_monitor
+from relay_manager import relay_manager
 from pdf_service import generate_patrol_report, generate_analysis_report
 
 import logging
@@ -237,6 +238,44 @@ def test_live_monitor_stop():
 @app.route('/api/test_live_monitor/status', methods=['GET'])
 def test_live_monitor_status():
     return jsonify(test_live_monitor.get_status())
+
+
+# --- Relay & VILA Health API ---
+
+@app.route('/api/relay/status', methods=['GET'])
+def relay_status():
+    return jsonify(relay_manager.get_status())
+
+
+@app.route('/api/relay/test', methods=['POST'])
+def relay_test():
+    """Quick test: start robot camera relay, wait 3s, check status, stop."""
+    from config import MEDIAMTX_INTERNAL
+    try:
+        rtsp_path = relay_manager.start_robot_camera_relay(
+            ROBOT_ID, robot_service.get_front_camera_image, MEDIAMTX_INTERNAL)
+        time.sleep(3)
+        status = relay_manager.get_status()
+        relay_manager.stop_all()
+        return jsonify({"rtsp_path": rtsp_path, "status": status})
+    except Exception as e:
+        relay_manager.stop_all()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/vila/health', methods=['GET'])
+def vila_health():
+    """Check VILA JPS health endpoint."""
+    settings = settings_service.get_all()
+    vila_jps_url = settings.get("vila_jps_url", "")
+    if not vila_jps_url:
+        return jsonify({"error": "VILA JPS URL not configured"}), 400
+    try:
+        import requests as req
+        resp = req.get(f"{vila_jps_url.rstrip('/')}/api/v1/health/ready", timeout=5)
+        return jsonify({"status": "ok" if resp.ok else "error", "code": resp.status_code})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 503
 
 
 # --- Patrol & Settings API ---
@@ -489,7 +528,7 @@ def get_live_alerts():
 
     with db_context() as (conn, cursor):
         cursor.execute(
-            'SELECT id, rule, response, image_path, timestamp FROM live_alerts WHERE run_id = ? ORDER BY id DESC',
+            'SELECT id, rule, response, image_path, timestamp, stream_source FROM live_alerts WHERE run_id = ? ORDER BY id DESC',
             (current_run_id,)
         )
         rows = cursor.fetchall()

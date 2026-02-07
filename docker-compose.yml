@@ -11,6 +11,13 @@ services:
       - robot-a
     restart: unless-stopped
 
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: visual_patrol_mediamtx
+    ports:
+      - "8554:8554"
+    restart: unless-stopped
+
   robot-a:
     container_name: visual_patrol_robot_a
     build: .
@@ -25,6 +32,10 @@ services:
       - ROBOT_ID=robot-a
       - ROBOT_NAME=Robot A
       - ROBOT_IP=192.168.50.133:26400
+      - MEDIAMTX_INTERNAL=mediamtx:8554
+      - MEDIAMTX_EXTERNAL=localhost:8554
+    depends_on:
+      - mediamtx
     restart: unless-stopped
 
   # robot-b:
