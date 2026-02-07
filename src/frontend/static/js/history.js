@@ -211,7 +211,7 @@ async function viewHistoryDetail(runId) {
 
                 let imgHtml = '';
                 if (ins.image_path) {
-                    imgHtml = `<img src="${imgBase}${ins.image_path}" style="width:120px; height:auto; border-radius:4px; border:1px solid #ccc;">`;
+                    imgHtml = `<img src="${encodeURI(imgBase + ins.image_path)}" style="width:120px; height:auto; border-radius:4px; border:1px solid #ccc;">`;
                 }
 
                 const resultHTML = renderAIResultHTML(ins.ai_response);

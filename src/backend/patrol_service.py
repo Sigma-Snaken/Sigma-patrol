@@ -254,6 +254,8 @@ class PatrolService:
         """Rename image with point name and status."""
         try:
             safe_name = point_name.replace("/", "_").replace("\\", "_")
+            # Transliterate non-ASCII chars to avoid HTTP encoding issues
+            safe_name = safe_name.encode('ascii', 'replace').decode('ascii').replace('?', '_')
             status_tag = "NG" if is_ng else "OK"
             new_filename = f"{safe_name}_{status_tag}_{img_uuid}.jpg"
             new_path = os.path.join(os.path.dirname(image_path), new_filename)
