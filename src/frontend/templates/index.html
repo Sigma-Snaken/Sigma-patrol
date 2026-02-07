@@ -452,15 +452,15 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Stream Sources</label>
+                            <label>Stream Source</label>
                             <div style="display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-secondary);">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" id="setting-enable-robot-camera-relay" style="width: auto;">
-                                    <label for="setting-enable-robot-camera-relay" style="margin: 0; cursor: pointer; font-size: 13px;">Robot Camera Relay</label>
+                                    <input type="radio" name="stream-source" id="setting-stream-source-robot" value="robot_camera" style="width: auto;">
+                                    <label for="setting-stream-source-robot" style="margin: 0; cursor: pointer; font-size: 13px;">Robot Camera Relay</label>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" id="setting-enable-external-rtsp" style="width: auto;">
-                                    <label for="setting-enable-external-rtsp" style="margin: 0; cursor: pointer; font-size: 13px;">External RTSP</label>
+                                    <input type="radio" name="stream-source" id="setting-stream-source-external" value="external_rtsp" style="width: auto;">
+                                    <label for="setting-stream-source-external" style="margin: 0; cursor: pointer; font-size: 13px;">External RTSP</label>
                                 </div>
                                 <input type="text" id="setting-external-rtsp-url" placeholder="rtsp://admin:pass@192.168.50.45:554/live" style="font-size: 12px;">
                             </div>

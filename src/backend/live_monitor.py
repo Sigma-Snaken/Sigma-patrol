@@ -143,6 +143,9 @@ class LiveMonitor:
             logger.warning(f"Truncating rules from {len(rules)} to {MAX_RULES}")
             rules = rules[:MAX_RULES]
 
+        # 0. Clean up any stale streams from previous runs
+        self._cleanup_stale_streams(vila_jps_url)
+
         # 1. Register each stream
         for stream in streams:
             try:
@@ -213,6 +216,24 @@ class LiveMonitor:
             return list(self.alerts)
 
     # --- VILA JPS API ---
+
+    def _cleanup_stale_streams(self, vila_jps_url):
+        """Remove any existing streams from VILA JPS to avoid 'Stream Maximum reached' errors."""
+        try:
+            url = f"{vila_jps_url}/api/v1/live-stream"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            streams = resp.json()
+            for s in streams:
+                sid = s.get("id")
+                if sid:
+                    try:
+                        self._deregister_stream(vila_jps_url, sid)
+                        logger.info(f"Cleaned up stale stream: {sid}")
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Failed to cleanup stale streams: {e}")
 
     def _register_stream(self, vila_jps_url, rtsp_url, name):
         """POST /api/v1/live-stream to register a stream. Returns stream_id or None."""

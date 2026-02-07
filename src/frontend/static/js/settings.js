@@ -72,11 +72,16 @@ export async function loadSettings() {
     const vilaJpsUrl = document.getElementById('setting-vila-jps-url');
     if (vilaJpsUrl) vilaJpsUrl.value = data.vila_jps_url || '';
 
-    const robotCameraRelay = document.getElementById('setting-enable-robot-camera-relay');
-    if (robotCameraRelay) robotCameraRelay.checked = data.enable_robot_camera_relay === true;
-
-    const externalRtsp = document.getElementById('setting-enable-external-rtsp');
-    if (externalRtsp) externalRtsp.checked = data.enable_external_rtsp === true;
+    // Stream source radio (mutually exclusive — JPS supports 1 stream)
+    const radioRobot = document.getElementById('setting-stream-source-robot');
+    const radioExternal = document.getElementById('setting-stream-source-external');
+    if (radioRobot && radioExternal) {
+        if (data.enable_external_rtsp === true) {
+            radioExternal.checked = true;
+        } else if (data.enable_robot_camera_relay === true) {
+            radioRobot.checked = true;
+        }
+    }
 
     const externalRtspUrl = document.getElementById('setting-external-rtsp-url');
     if (externalRtspUrl) externalRtspUrl.value = data.external_rtsp_url || '';
@@ -140,8 +145,8 @@ async function saveSettings() {
         live_monitor_rules: (document.getElementById('setting-live-monitor-rules')?.value || '')
             .split('\n').map(s => s.trim()).filter(s => s.length > 0),
         vila_jps_url: document.getElementById('setting-vila-jps-url')?.value || '',
-        enable_robot_camera_relay: document.getElementById('setting-enable-robot-camera-relay')?.checked || false,
-        enable_external_rtsp: document.getElementById('setting-enable-external-rtsp')?.checked || false,
+        enable_robot_camera_relay: document.getElementById('setting-stream-source-robot')?.checked || false,
+        enable_external_rtsp: document.getElementById('setting-stream-source-external')?.checked || false,
         external_rtsp_url: document.getElementById('setting-external-rtsp-url')?.value || '',
     };
     try {
