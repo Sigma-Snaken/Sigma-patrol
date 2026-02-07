@@ -278,6 +278,14 @@ export async function testLiveMonitor() {
 }
 window.testLiveMonitor = testLiveMonitor;
 
+export function switchSettingsTab(tabName) {
+    document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-content').forEach(div => div.classList.remove('active'));
+    document.getElementById(`settings-tab-${tabName}`)?.classList.add('active');
+    document.querySelector(`.settings-tab-btn[onclick="switchSettingsTab('${tabName}')"]`)?.classList.add('active');
+}
+window.switchSettingsTab = switchSettingsTab;
+
 function startClock() {
     if (state._intervals.clock) return; // Prevent duplicate intervals
 

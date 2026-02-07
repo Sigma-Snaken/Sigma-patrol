@@ -424,8 +424,16 @@
                 <div class="header" style="width: 100%; max-width: 1200px; margin: 0 auto;">
                     <h1>System Configuration</h1>
                 </div>
-                <div class="settings-two-column glass-panel">
-                    <!-- LEFT COLUMN: General Settings -->
+
+                <!-- Settings Sub-Tabs -->
+                <div class="settings-tabs">
+                    <button class="settings-tab-btn active" onclick="switchSettingsTab('general')">General</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('gemini')">Gemini AI</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('vila')">VILA / Live Monitor</button>
+                </div>
+
+                <!-- Tab 1: General -->
+                <div id="settings-tab-general" class="settings-tab-content active">
                     <div class="settings-column">
                         <h3 class="settings-section-title">General Settings</h3>
 
@@ -436,21 +444,92 @@
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>Gemini API Key</label>
-                            <input type="password" id="setting-api-key" placeholder="Enter Gemini API Key">
+                            <label>Timezone</label>
+                            <select id="setting-timezone">
+                                <option value="UTC">UTC</option>
+                                <option value="Asia/Taipei">Asia/Taipei</option>
+                                <option value="Asia/Tokyo">Asia/Tokyo</option>
+                                <option value="America/New_York">America/New_York</option>
+                                <option value="America/Los_Angeles">America/Los_Angeles</option>
+                                <option value="Europe/London">Europe/London</option>
+                            </select>
                         </div>
-                        <div class="form-group">
-                            <label>Gemini Model</label>
-                            <input type="text" id="setting-model" value="gemini-1.5-flash">
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="setting-turbo-mode" style="width: auto;">
+                            <label for="setting-turbo-mode" style="margin: 0; cursor: pointer;">Enable Turbo Mode (Async Analysis)</label>
+                        </div>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="setting-enable-video" style="width: auto;">
+                            <label for="setting-enable-video" style="margin: 0; cursor: pointer;">Enable Video Recording</label>
+                        </div>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="setting-enable-idle-stream" style="width: auto;">
+                            <label for="setting-enable-idle-stream" style="margin: 0; cursor: pointer;">Continuous Camera Stream</label>
                         </div>
 
                         <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);"></div>
+
+                        <h3 class="settings-section-title">Telegram Notifications</h3>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="setting-enable-telegram" style="width: auto;">
+                            <label for="setting-enable-telegram" style="margin: 0; cursor: pointer;">Enable Telegram Notification</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Telegram Bot Token</label>
+                            <input type="password" id="setting-telegram-bot-token" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
+                        </div>
+                        <div class="form-group">
+                            <label>Telegram User ID</label>
+                            <input type="text" id="setting-telegram-user-id" placeholder="e.g. 123456789">
+                        </div>
+                        <div class="form-group">
+                            <label>Telegram Message Prompt</label>
+                            <textarea id="setting-telegram-message-prompt" rows="4" placeholder="Prompt for generating concise Telegram notification messages..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Gemini AI -->
+                <div id="settings-tab-gemini" class="settings-tab-content">
+                    <div class="settings-column">
+                        <h3 class="settings-section-title">Gemini AI Settings</h3>
+
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="password" id="setting-api-key" placeholder="Enter Gemini API Key">
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <input type="text" id="setting-model" value="gemini-1.5-flash">
+                        </div>
+                        <div class="form-group">
+                            <label>System Role / Prompt</label>
+                            <textarea id="setting-role" rows="5" placeholder="Define the AI's behavior and context..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Video Analysis Prompt</label>
+                            <textarea id="setting-video-prompt" rows="4" placeholder="Instructions for video analysis..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Report Prompt (Single Run)</label>
+                            <textarea id="setting-report-prompt" rows="4" placeholder="Custom instructions for single patrol report generation..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Multiday Report Prompt (Date Range)</label>
+                            <textarea id="setting-multiday-report-prompt" rows="4" placeholder="Custom instructions for aggregated report generation..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: VILA / Live Monitor -->
+                <div id="settings-tab-vila" class="settings-tab-content">
+                    <div class="settings-column">
                         <h3 class="settings-section-title">Live Monitor (VILA JPS)</h3>
+
                         <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
                             <input type="checkbox" id="setting-enable-live-monitor" style="width: auto;">
                             <label for="setting-enable-live-monitor" style="margin: 0; cursor: pointer;">Enable Live Monitoring</label>
                         </div>
-
                         <div class="form-group">
                             <label>Stream Source</label>
                             <div style="display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-secondary);">
@@ -465,7 +544,6 @@
                                 <input type="text" id="setting-external-rtsp-url" placeholder="rtsp://admin:pass@192.168.50.45:554/live" style="font-size: 12px;">
                             </div>
                         </div>
-
                         <div class="form-group">
                             <label>VILA JPS URL</label>
                             <input type="text" id="setting-vila-jps-url" placeholder="http://localhost:5010">
@@ -503,74 +581,9 @@
                         </div>
                         <div id="live-monitor-test-results" style="display:none; margin-top: 8px; max-height: 300px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px; background: var(--bg-secondary); font-size: 12px; font-family: monospace;">
                         </div>
-                        <div class="form-group">
-                            <label>Timezone</label>
-                            <select id="setting-timezone">
-                                <option value="UTC">UTC</option>
-                                <option value="Asia/Taipei">Asia/Taipei</option>
-                                <option value="Asia/Tokyo">Asia/Tokyo</option>
-                                <option value="America/New_York">America/New_York</option>
-                                <option value="America/Los_Angeles">America/Los_Angeles</option>
-                                <option value="Europe/London">Europe/London</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
-                            <input type="checkbox" id="setting-turbo-mode" style="width: auto;">
-                            <label for="setting-turbo-mode" style="margin: 0; cursor: pointer;">Enable Turbo Mode (Async Analysis)</label>
-                        </div>
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
-                            <input type="checkbox" id="setting-enable-video" style="width: auto;">
-                            <label for="setting-enable-video" style="margin: 0; cursor: pointer;">Enable Video Recording</label>
-                        </div>
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
-                            <input type="checkbox" id="setting-enable-idle-stream" style="width: auto;">
-                            <label for="setting-enable-idle-stream" style="margin: 0; cursor: pointer;">Continuous Camera Stream</label>
-                        </div>
-
-                        <div class="section-divider" style="margin: 8px 0; border-top: 1px solid var(--border-subtle);"></div>
-
-                        <h3 class="settings-section-title">Telegram Notifications</h3>
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px;">
-                            <input type="checkbox" id="setting-enable-telegram" style="width: auto;">
-                            <label for="setting-enable-telegram" style="margin: 0; cursor: pointer;">Enable Telegram Notification</label>
-                        </div>
-                        <div class="form-group">
-                            <label>Telegram Bot Token</label>
-                            <input type="password" id="setting-telegram-bot-token" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
-                        </div>
-                        <div class="form-group">
-                            <label>Telegram User ID</label>
-                            <input type="text" id="setting-telegram-user-id" placeholder="e.g. 123456789">
-                        </div>
-                        <div class="form-group">
-                            <label>Telegram Message Prompt</label>
-                            <textarea id="setting-telegram-message-prompt" rows="4" placeholder="Prompt for generating concise Telegram notification messages..."></textarea>
-                        </div>
-                    </div>
-
-                    <!-- RIGHT COLUMN: Prompt Settings -->
-                    <div class="settings-column">
-                        <h3 class="settings-section-title">Prompt Settings</h3>
-
-                        <div class="form-group">
-                            <label>System Role / Prompt</label>
-                            <textarea id="setting-role" rows="5" placeholder="Define the AI's behavior and context..."></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Video Analysis Prompt</label>
-                            <textarea id="setting-video-prompt" rows="4" placeholder="Instructions for video analysis..."></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Report Prompt (Single Run)</label>
-                            <textarea id="setting-report-prompt" rows="4" placeholder="Custom instructions for single patrol report generation..."></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Multiday Report Prompt (Date Range)</label>
-                            <textarea id="setting-multiday-report-prompt" rows="4" placeholder="Custom instructions for aggregated report generation..."></textarea>
-                        </div>
                     </div>
                 </div>
+
                 <div style="width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px 24px;">
                     <button class="btn-primary" id="btn-save-settings">Save Settings</button>
                 </div>
