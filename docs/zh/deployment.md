@@ -196,45 +196,44 @@ docker compose -f docker-compose.prod.yaml restart robot-a
 docker compose -f docker-compose.prod.yaml ps
 ```
 
-### RTSP Relay Service (Jetson GPU 編碼)
+### RTSP Relay Service (Jetson)
 
-Relay Service 是選用的 Jetson 端元件，利用 Jetson 的 NVENC 硬體編碼器處理所有 ffmpeg 影像編碼。與 mediamtx、VILA JPS 一起在 Jetson 上執行。
+Relay Service 是 Jetson 端元件，處理所有 ffmpeg 影像轉碼。與 mediamtx、VILA JPS 一起在 Jetson 上執行。CI 自動建置多架構映像至 `ghcr.io/sigma-snaken/visual-patrol-relay:latest`。
 
-**為什麼需要？** 在 Jetson 上執行 ffmpeg 編碼，而非在 Flask 容器中：
-- 硬體加速編碼 (NVENC/h264_nvmpi) 取代軟體 libx264
-- 更低延遲與 CPU 使用率
+**為什麼需要？** 在 Jetson 上執行 ffmpeg 轉碼，而非在 Flask 容器中：
+- 所有串流轉碼為乾淨的 H264 Baseline profile（NvMMLite 硬體解碼器要求）
 - 消除跨網路 RTSP 串流不穩定問題
+- 機器人相機 (JPEG→H264) 與外部相機 (重新編碼) 走相同 pipeline
 
 **架構：**
 ```
 VP Flask (開發/Jetson)             Jetson (host networking)
 ┌──────────────────────┐          ┌─────────────────────────────┐
 │ relay_manager.py     │  HTTP    │ relay_service.py (:5020)    │
-│  RelayServiceClient  │ ──────> │  ffmpeg NVENC/libx264       │
+│  RelayServiceClient  │ ──────> │  ffmpeg 轉碼 (libx264)      │
 │  FrameFeederThread   │         │  → mediamtx (:8555)         │
+│                      │         │  → VILA JPS (:5010/:5016)   │
 └──────────────────────┘         └─────────────────────────────┘
 ```
 
-VP 透過 gRPC 擷取機器人相機畫面，以 HTTP POST 送至 Relay Service。Relay Service 編碼後推送至 mediamtx。
+VP 透過 gRPC 擷取機器人相機畫面，以 HTTP POST 送至 Relay Service。外部相機則由 Relay Service 直接拉取 RTSP 來源。兩種類型都經過轉碼後推送至 mediamtx。
 
 **設定 (Jetson)：**
 
 ```bash
-# 建置 relay service 映像 (在 Jetson 上從 repo 根目錄執行)
-cd /code/visual-patrol
-git pull
-docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+# 拉取 CI 建置的映像
+docker pull ghcr.io/sigma-snaken/visual-patrol-relay:latest
 
-# 執行 (需 GPU 存取)
+# 執行
+docker rm -f visual_patrol_rtsp_relay 2>/dev/null
 docker run -d --name visual_patrol_rtsp_relay \
-  --runtime=nvidia --network=host \
-  -v /code/visual-patrol/deploy/logs:/app/logs \
+  --network=host \
   -e TZ=Asia/Taipei \
   -e RELAY_SERVICE_PORT=5020 \
   -e MEDIAMTX_HOST=localhost:8555 \
-  -e USE_NVENC=true \
+  -e USE_NVENC=false \
   --restart=unless-stopped \
-  visual-patrol-relay
+  ghcr.io/sigma-snaken/visual-patrol-relay:latest
 ```
 
 或使用 prod compose 檔，其中已包含 `rtsp-relay` 服務。
@@ -245,7 +244,7 @@ docker run -d --name visual_patrol_rtsp_relay \
 |------|--------|------|
 | `RELAY_SERVICE_PORT` | `5020` | HTTP API 監聽埠 |
 | `MEDIAMTX_HOST` | `localhost:8555` | mediamtx RTSP 推送目標 |
-| `USE_NVENC` | `true` | 使用 NVENC 硬體編碼 (`h264_nvmpi`)。設為 `false` 退回 `libx264`。 |
+| `USE_NVENC` | `false` | 使用 NVENC 硬體編碼 (`h264_nvmpi`)。需 L4T 基礎映像。 |
 | `LOG_DIR` | `./logs` | 日誌檔目錄 |
 
 **VP 連線設定：** 在每個 robot 服務上設定 `RELAY_SERVICE_URL`：
@@ -266,6 +265,34 @@ curl http://localhost:5020/relays
 # 停止所有 relay
 curl -X POST http://localhost:5020/relays/stop_all
 ```
+
+### JPS VLM streaming.py Patch
+
+VILA JPS 內建的 `jetson_utils.videoSource` 建立的 GStreamer pipeline 缺少 `h264parse`，
+導致 `nvv4l2decoder` 無法解析從 mediamtx relay 過來的 H264 串流（錯誤：`Stream format not found`）。
+
+`deploy/vila-jps/streaming_patched.py` 以 GStreamer Python bindings 取代 `jetson_utils.videoSource`，
+建立含 `h264parse` 的自訂 pipeline：
+
+```
+rtspsrc (TCP) → rtph264depay → h264parse → nvv4l2decoder → nvvidconv → appsink
+```
+
+**設定：**
+
+```bash
+# 複製 patch 檔案至 JPS 目錄
+cp deploy/vila-jps/streaming_patched.py /code/vila-jps/streaming_patched.py
+
+# 確認 JPS compose.yaml 有 volume mount：
+# volumes:
+#   - ./streaming_patched.py:/jetson-services/inference/vlm/src/mmj_utils/mmj_utils/streaming.py
+
+# 重啟 JPS
+cd /code/vila-jps && docker compose restart jps_vlm
+```
+
+詳見 [Relay Service 部署說明](../deploy/relay-service/JETSON_SETUP.md)。
 
 ## Docker 映像
 

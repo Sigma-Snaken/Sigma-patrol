@@ -23,15 +23,24 @@ docker compose -f docker-compose.prod.yaml pull
 docker compose -f docker-compose.prod.yaml up -d
 ```
 
-## RTSP Relay Service (Jetson only)
+## RTSP Relay Service (Jetson)
 
-The relay service runs on Jetson for GPU-accelerated video encoding. Build locally:
+CI builds multi-arch images to GHCR. Pull and run:
 
 ```bash
-cd /code/visual-patrol
-git pull
-docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+docker pull ghcr.io/sigma-snaken/visual-patrol-relay:latest
 docker compose -f deploy/docker-compose.prod.yaml up -d rtsp-relay
 ```
 
-See [Deployment Guide - RTSP Relay Service](../docs/deployment.md#rtsp-relay-service-jetson-gpu-encoding) for details.
+See [Relay Service Setup](relay-service/JETSON_SETUP.md) for details including JPS VLM patch.
+
+## JPS VLM Patch
+
+VILA JPS requires a patched `streaming.py` to add `h264parse` for NvMMLite decoder compatibility:
+
+```bash
+cp deploy/vila-jps/streaming_patched.py /code/vila-jps/streaming_patched.py
+cd /code/vila-jps && docker compose restart jps_vlm
+```
+
+See [Relay Service Setup](relay-service/JETSON_SETUP.md) for details.

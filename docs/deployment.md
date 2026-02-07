@@ -146,45 +146,44 @@ Visual Patrol connects to mediamtx via the `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXT
 
 **Port conflicts:** If the default RTSP port (8554) is already in use (e.g., by VILA JPS VST), configure mediamtx on another port like `8555` and update `MEDIAMTX_INTERNAL`/`MEDIAMTX_EXTERNAL` on all robot services to match.
 
-### RTSP Relay Service (Jetson GPU Encoding)
+### RTSP Relay Service (Jetson)
 
-The relay service is an optional Jetson-side component that handles all ffmpeg video encoding using Jetson's NVENC hardware encoder. It runs alongside mediamtx and VILA JPS on the Jetson.
+The relay service is a Jetson-side component that handles all ffmpeg video transcoding. It runs alongside mediamtx and VILA JPS on the Jetson. CI automatically builds multi-arch images to `ghcr.io/sigma-snaken/visual-patrol-relay:latest`.
 
-**Why?** Running ffmpeg encoding on Jetson instead of in the Flask container provides:
-- Hardware-accelerated encoding (NVENC/h264_nvmpi) instead of software libx264
-- Lower latency and CPU usage
+**Why?** Running ffmpeg on Jetson instead of in the Flask container provides:
+- All streams transcoded to clean H264 Baseline profile (required for NvMMLite hardware decoder)
 - Eliminates cross-network RTSP stream instability
+- Both robot camera (JPEG→H264) and external RTSP (re-encode) go through the same pipeline
 
 **Architecture:**
 ```
 VP Flask (dev/Jetson)              Jetson (host networking)
 ┌──────────────────────┐          ┌─────────────────────────────┐
 │ relay_manager.py     │  HTTP    │ relay_service.py (:5020)    │
-│  RelayServiceClient  │ ──────> │  ffmpeg NVENC/libx264       │
+│  RelayServiceClient  │ ──────> │  ffmpeg transcode (libx264) │
 │  FrameFeederThread   │         │  → mediamtx (:8555)         │
+│                      │         │  → VILA JPS (:5010/:5016)   │
 └──────────────────────┘         └─────────────────────────────┘
 ```
 
-VP grabs robot camera frames via gRPC and POSTs them to the relay service over HTTP. The relay service encodes and pushes to mediamtx.
+VP grabs robot camera frames via gRPC and POSTs them to the relay service over HTTP. For external cameras, the relay fetches the RTSP source directly. Both types are transcoded and pushed to mediamtx.
 
 **Setup (Jetson):**
 
 ```bash
-# Build the relay service image (from repo root, on Jetson)
-cd /code/visual-patrol
-git pull
-docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+# Pull CI-built image
+docker pull ghcr.io/sigma-snaken/visual-patrol-relay:latest
 
-# Run (with GPU access)
+# Run
+docker rm -f visual_patrol_rtsp_relay 2>/dev/null
 docker run -d --name visual_patrol_rtsp_relay \
-  --runtime=nvidia --network=host \
-  -v /code/visual-patrol/deploy/logs:/app/logs \
+  --network=host \
   -e TZ=Asia/Taipei \
   -e RELAY_SERVICE_PORT=5020 \
   -e MEDIAMTX_HOST=localhost:8555 \
-  -e USE_NVENC=true \
+  -e USE_NVENC=false \
   --restart=unless-stopped \
-  visual-patrol-relay
+  ghcr.io/sigma-snaken/visual-patrol-relay:latest
 ```
 
 Or use the prod compose file which includes the `rtsp-relay` service.
@@ -195,7 +194,7 @@ Or use the prod compose file which includes the `rtsp-relay` service.
 |----------|---------|-------------|
 | `RELAY_SERVICE_PORT` | `5020` | HTTP API listen port |
 | `MEDIAMTX_HOST` | `localhost:8555` | mediamtx RTSP push target |
-| `USE_NVENC` | `true` | Use NVENC hardware encoder (`h264_nvmpi`). Set `false` to fallback to `libx264`. |
+| `USE_NVENC` | `false` | Use NVENC hardware encoder (`h264_nvmpi`). Requires L4T base image. |
 | `LOG_DIR` | `./logs` | Log file directory |
 
 **VP Connection:** Set `RELAY_SERVICE_URL` on each robot service to point to the relay service:
@@ -216,7 +215,7 @@ curl http://localhost:5020/relays
 # Test external RTSP relay
 curl -X POST http://localhost:5020/relays \
   -H 'Content-Type: application/json' \
-  -d '{"key":"test/external","type":"external_rtsp","source_url":"rtsp://admin:pass@192.168.50.46:554/live"}'
+  -d '{"key":"test/external","type":"external_rtsp","source_url":"rtsp://admin:pass@192.168.50.45:554/live/profile.1"}'
 
 # Check stream readiness
 curl "http://localhost:5020/relays/test%2Fexternal/ready?timeout=15"
@@ -224,6 +223,32 @@ curl "http://localhost:5020/relays/test%2Fexternal/ready?timeout=15"
 # Stop all relays
 curl -X POST http://localhost:5020/relays/stop_all
 ```
+
+### JPS VLM streaming.py Patch
+
+VILA JPS's built-in `jetson_utils.videoSource` creates a GStreamer pipeline without `h264parse`, causing `nvv4l2decoder` to fail with "Stream format not found" when reading from mediamtx relay streams.
+
+A patched `streaming.py` is provided at `deploy/vila-jps/streaming_patched.py`. It replaces `jetson_utils.videoSource` with a custom GStreamer Python pipeline:
+
+```
+rtspsrc (TCP) → rtph264depay → h264parse → nvv4l2decoder → nvvidconv → appsink
+```
+
+**Setup:**
+
+```bash
+# Copy patch to JPS directory
+cp deploy/vila-jps/streaming_patched.py /code/vila-jps/streaming_patched.py
+
+# Ensure JPS compose.yaml has the volume mount:
+# volumes:
+#   - ./streaming_patched.py:/jetson-services/inference/vlm/src/mmj_utils/mmj_utils/streaming.py
+
+# Restart JPS
+cd /code/vila-jps && docker compose restart jps_vlm
+```
+
+See [Relay Service Setup](../deploy/relay-service/JETSON_SETUP.md) for full details.
 
 ### Adding a Robot (Prod)
 

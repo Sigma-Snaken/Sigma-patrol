@@ -45,7 +45,7 @@ services:
       - TZ=Asia/Taipei
       - RELAY_SERVICE_PORT=5020
       - MEDIAMTX_HOST=localhost:8555
-      - USE_NVENC=true
+      - USE_NVENC=false
     restart: unless-stopped
 
   # robot-b:
