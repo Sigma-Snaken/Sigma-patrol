@@ -467,13 +467,9 @@ class TestLiveMonitor:
                 self.error = "Robot camera not available"
                 return
 
-        # 1. Start snapshot immediately (reads directly from source, no mediamtx)
+        # Relay → snapshot (from mediamtx) → JPS registration → WebSocket
+        # All in background so start() returns immediately
         self.is_running = True
-        self._snapshot_thread = threading.Thread(target=self._snapshot_loop, daemon=True)
-        self._snapshot_thread.start()
-        logger.info("Snapshot capture started — video preview available")
-
-        # 2. Relay + JPS registration + WebSocket in background (don't block response)
         self._jps_thread = threading.Thread(
             target=self._jps_setup,
             args=(config,),
@@ -544,6 +540,13 @@ class TestLiveMonitor:
             logger.error(self.error)
             self._stop_relay()
             return
+
+        # Start snapshot thread now that stream is available on mediamtx
+        self._snapshot_thread = threading.Thread(
+            target=self._snapshot_loop,
+            daemon=True,
+        )
+        self._snapshot_thread.start()
 
         # 3. Cleanup stale JPS streams
         try:
@@ -672,52 +675,27 @@ class TestLiveMonitor:
             self._relay_key = None
 
     def _snapshot_loop(self):
-        """Background thread: capture frames for live preview directly from source.
+        """Background thread: capture frames from mediamtx RTSP for live preview.
 
-        Robot camera: gRPC frame_func() → JPEG bytes (no mediamtx round-trip).
-        External camera: OpenCV reads source RTSP URL directly.
+        Pulls from mediamtx using the relay key, validating the full pipeline:
+        source → relay service → ffmpeg → mediamtx → this snapshot.
+        Works for both robot_camera and external_rtsp relay types.
         """
-        stream_source = self._config.get("stream_source", "robot_camera")
-
-        if stream_source == "robot_camera":
-            self._snapshot_loop_robot()
-        else:
-            self._snapshot_loop_external()
-
-    def _snapshot_loop_robot(self):
-        """Capture frames from robot camera via gRPC."""
-        frame_func = self._config.get("frame_func")
-        if not frame_func:
-            return
-
-        while not self._snapshot_stop.is_set():
-            try:
-                img = frame_func()
-                if img and img.data:
-                    with self._lock:
-                        self._latest_frame = img.data  # already JPEG
-            except Exception as e:
-                logger.debug(f"Snapshot capture error (gRPC): {e}")
-            self._snapshot_stop.wait(self.SNAPSHOT_INTERVAL)
-
-    def _snapshot_loop_external(self):
-        """Capture frames from mediamtx relay (Docker bridge can't reach camera directly)."""
         mediamtx_internal = self._config.get("mediamtx_internal", "")
-        robot_id = self._config.get("robot_id", "")
-        if not mediamtx_internal or not robot_id:
+        if not mediamtx_internal or not self._relay_key:
             return
-        ext_url = f"rtsp://{mediamtx_internal}/{robot_id}/external"
-        logger.info(f"External snapshot will pull from mediamtx: {ext_url}")
+        rtsp_url = f"rtsp://{mediamtx_internal}/{self._relay_key}"
+        logger.info(f"Snapshot pulling from mediamtx: {rtsp_url}")
 
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         cap = None
         while not self._snapshot_stop.is_set():
             try:
                 if cap is None or not cap.isOpened():
-                    cap = cv2.VideoCapture(ext_url, cv2.CAP_FFMPEG)
+                    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     if not cap.isOpened():
-                        logger.warning(f"Failed to open external RTSP: {ext_url}")
+                        logger.warning(f"Failed to open RTSP for snapshot: {rtsp_url}")
                         self._snapshot_stop.wait(3)
                         continue
 
