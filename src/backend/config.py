@@ -10,6 +10,9 @@ ROBOT_IP = os.getenv("ROBOT_IP", "192.168.50.133:26400")
 MEDIAMTX_INTERNAL = os.getenv("MEDIAMTX_INTERNAL", "localhost:8554")
 MEDIAMTX_EXTERNAL = os.getenv("MEDIAMTX_EXTERNAL", "localhost:8554")
 
+# Relay service (Jetson-side ffmpeg relay, empty = use local RelayManager)
+RELAY_SERVICE_URL = os.getenv("RELAY_SERVICE_URL", "")
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))

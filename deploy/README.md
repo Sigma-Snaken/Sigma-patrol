@@ -22,3 +22,16 @@ docker compose -f docker-compose.prod.yaml up -d
 docker compose -f docker-compose.prod.yaml pull
 docker compose -f docker-compose.prod.yaml up -d
 ```
+
+## RTSP Relay Service (Jetson only)
+
+The relay service runs on Jetson for GPU-accelerated video encoding. Build locally:
+
+```bash
+cd /code/visual-patrol
+git pull
+docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+docker compose -f deploy/docker-compose.prod.yaml up -d rtsp-relay
+```
+
+See [Deployment Guide - RTSP Relay Service](../docs/deployment.md#rtsp-relay-service-jetson-gpu-encoding) for details.

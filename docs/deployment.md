@@ -132,19 +132,98 @@ The `data/` and `logs/` directories are created automatically on first start.
 
 ### mediamtx (External Dependency)
 
-mediamtx is the RTSP relay server used for live monitoring. It is **not included** in visual-patrol's docker-compose files -- it is deployed as a standalone compose at `/home/nvidia/mediamtx/compose.yaml` on the Jetson.
+mediamtx is the RTSP relay server used for live monitoring. It is **not included** in visual-patrol's docker-compose files -- it is deployed as a standalone compose at `/code/mediamtx/compose.yaml` on the Jetson.
 
 ```bash
 # Start mediamtx
-cd /home/nvidia/mediamtx && docker compose up -d
+cd /code/mediamtx && docker compose up -d
 
 # Check status
-docker compose -f /home/nvidia/mediamtx/compose.yaml ps
+docker compose -f /code/mediamtx/compose.yaml ps
 ```
 
 Visual Patrol connects to mediamtx via the `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXTERNAL` environment variables on each robot service. Ensure mediamtx is running and reachable at the configured addresses before enabling live monitoring.
 
 **Port conflicts:** If the default RTSP port (8554) is already in use (e.g., by VILA JPS VST), configure mediamtx on another port like `8555` and update `MEDIAMTX_INTERNAL`/`MEDIAMTX_EXTERNAL` on all robot services to match.
+
+### RTSP Relay Service (Jetson GPU Encoding)
+
+The relay service is an optional Jetson-side component that handles all ffmpeg video encoding using Jetson's NVENC hardware encoder. It runs alongside mediamtx and VILA JPS on the Jetson.
+
+**Why?** Running ffmpeg encoding on Jetson instead of in the Flask container provides:
+- Hardware-accelerated encoding (NVENC/h264_nvmpi) instead of software libx264
+- Lower latency and CPU usage
+- Eliminates cross-network RTSP stream instability
+
+**Architecture:**
+```
+VP Flask (dev/Jetson)              Jetson (host networking)
+┌──────────────────────┐          ┌─────────────────────────────┐
+│ relay_manager.py     │  HTTP    │ relay_service.py (:5020)    │
+│  RelayServiceClient  │ ──────> │  ffmpeg NVENC/libx264       │
+│  FrameFeederThread   │         │  → mediamtx (:8555)         │
+└──────────────────────┘         └─────────────────────────────┘
+```
+
+VP grabs robot camera frames via gRPC and POSTs them to the relay service over HTTP. The relay service encodes and pushes to mediamtx.
+
+**Setup (Jetson):**
+
+```bash
+# Build the relay service image (from repo root, on Jetson)
+cd /code/visual-patrol
+git pull
+docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+
+# Run (with GPU access)
+docker run -d --name visual_patrol_rtsp_relay \
+  --runtime=nvidia --network=host \
+  -v /code/visual-patrol/deploy/logs:/app/logs \
+  -e TZ=Asia/Taipei \
+  -e RELAY_SERVICE_PORT=5020 \
+  -e MEDIAMTX_HOST=localhost:8555 \
+  -e USE_NVENC=true \
+  --restart=unless-stopped \
+  visual-patrol-relay
+```
+
+Or use the prod compose file which includes the `rtsp-relay` service.
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RELAY_SERVICE_PORT` | `5020` | HTTP API listen port |
+| `MEDIAMTX_HOST` | `localhost:8555` | mediamtx RTSP push target |
+| `USE_NVENC` | `true` | Use NVENC hardware encoder (`h264_nvmpi`). Set `false` to fallback to `libx264`. |
+| `LOG_DIR` | `./logs` | Log file directory |
+
+**VP Connection:** Set `RELAY_SERVICE_URL` on each robot service to point to the relay service:
+- Production (Jetson, host networking): `RELAY_SERVICE_URL=http://localhost:5020`
+- Development (WSL2, bridge networking): `RELAY_SERVICE_URL=http://192.168.50.35:5020` (Jetson IP)
+
+When `RELAY_SERVICE_URL` is not set or the service is unreachable, VP falls back to local ffmpeg (software encoding in the Flask container).
+
+**Verify:**
+
+```bash
+# Health check
+curl http://localhost:5020/health
+
+# List active relays
+curl http://localhost:5020/relays
+
+# Test external RTSP relay
+curl -X POST http://localhost:5020/relays \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"test/external","type":"external_rtsp","source_url":"rtsp://admin:pass@192.168.50.46:554/live"}'
+
+# Check stream readiness
+curl "http://localhost:5020/relays/test%2Fexternal/ready?timeout=15"
+
+# Stop all relays
+curl -X POST http://localhost:5020/relays/stop_all
+```
 
 ### Adding a Robot (Prod)
 
@@ -326,5 +405,7 @@ healthcheck:
 | mediamtx port conflict | Change `MTX_RTSPADDRESS` and update `MEDIAMTX_*` env vars to match |
 | Live monitor not working | Check `logs/{robot-id}_live_monitor.log`; verify VILA JPS is running (`/api/vila/health`) |
 | ffmpeg relay crashing | Check `logs/{robot-id}_relay_manager.log`; verify mediamtx is running |
+| Relay service unreachable | Check `RELAY_SERVICE_URL` env var; verify relay service is running: `curl http://localhost:5020/health`; VP falls back to local ffmpeg automatically |
+| NVENC encoder not working | Check `USE_NVENC` env var; verify `--runtime=nvidia`; check relay service logs for encoder errors; set `USE_NVENC=false` to fallback to libx264 |
 | Permission denied on data/logs | The entrypoint script runs `chown` automatically; check if `gosu` is installed |
 | Stale robot entries in DB | Can happen if `ROBOT_ID` env var is missing (defaults to `"default"`) |

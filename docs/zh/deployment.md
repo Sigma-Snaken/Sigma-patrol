@@ -196,6 +196,77 @@ docker compose -f docker-compose.prod.yaml restart robot-a
 docker compose -f docker-compose.prod.yaml ps
 ```
 
+### RTSP Relay Service (Jetson GPU 編碼)
+
+Relay Service 是選用的 Jetson 端元件，利用 Jetson 的 NVENC 硬體編碼器處理所有 ffmpeg 影像編碼。與 mediamtx、VILA JPS 一起在 Jetson 上執行。
+
+**為什麼需要？** 在 Jetson 上執行 ffmpeg 編碼，而非在 Flask 容器中：
+- 硬體加速編碼 (NVENC/h264_nvmpi) 取代軟體 libx264
+- 更低延遲與 CPU 使用率
+- 消除跨網路 RTSP 串流不穩定問題
+
+**架構：**
+```
+VP Flask (開發/Jetson)             Jetson (host networking)
+┌──────────────────────┐          ┌─────────────────────────────┐
+│ relay_manager.py     │  HTTP    │ relay_service.py (:5020)    │
+│  RelayServiceClient  │ ──────> │  ffmpeg NVENC/libx264       │
+│  FrameFeederThread   │         │  → mediamtx (:8555)         │
+└──────────────────────┘         └─────────────────────────────┘
+```
+
+VP 透過 gRPC 擷取機器人相機畫面，以 HTTP POST 送至 Relay Service。Relay Service 編碼後推送至 mediamtx。
+
+**設定 (Jetson)：**
+
+```bash
+# 建置 relay service 映像 (在 Jetson 上從 repo 根目錄執行)
+cd /code/visual-patrol
+git pull
+docker build -f deploy/relay-service/Dockerfile -t visual-patrol-relay .
+
+# 執行 (需 GPU 存取)
+docker run -d --name visual_patrol_rtsp_relay \
+  --runtime=nvidia --network=host \
+  -v /code/visual-patrol/deploy/logs:/app/logs \
+  -e TZ=Asia/Taipei \
+  -e RELAY_SERVICE_PORT=5020 \
+  -e MEDIAMTX_HOST=localhost:8555 \
+  -e USE_NVENC=true \
+  --restart=unless-stopped \
+  visual-patrol-relay
+```
+
+或使用 prod compose 檔，其中已包含 `rtsp-relay` 服務。
+
+**環境變數：**
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `RELAY_SERVICE_PORT` | `5020` | HTTP API 監聽埠 |
+| `MEDIAMTX_HOST` | `localhost:8555` | mediamtx RTSP 推送目標 |
+| `USE_NVENC` | `true` | 使用 NVENC 硬體編碼 (`h264_nvmpi`)。設為 `false` 退回 `libx264`。 |
+| `LOG_DIR` | `./logs` | 日誌檔目錄 |
+
+**VP 連線設定：** 在每個 robot 服務上設定 `RELAY_SERVICE_URL`：
+- 正式環境 (Jetson, host networking)：`RELAY_SERVICE_URL=http://localhost:5020`
+- 開發環境 (WSL2, bridge networking)：`RELAY_SERVICE_URL=http://192.168.50.35:5020` (Jetson IP)
+
+未設定 `RELAY_SERVICE_URL` 或服務不可達時，VP 自動退回本地 ffmpeg (Flask 容器內軟體編碼)。
+
+**驗證：**
+
+```bash
+# 健康檢查
+curl http://localhost:5020/health
+
+# 列出活躍的 relay
+curl http://localhost:5020/relays
+
+# 停止所有 relay
+curl -X POST http://localhost:5020/relays/stop_all
+```
+
 ## Docker 映像
 
 ### 建置
@@ -286,3 +357,5 @@ healthcheck:
 | 連接埠衝突 (正式) | 確保每台機器人有唯一的 `PORT` 值 |
 | data/logs 權限被拒 | 進入點腳本會自動執行 `chown`；檢查 `gosu` 是否已安裝 |
 | 資料庫中出現過期的機器人記錄 | 可能因 `ROBOT_ID` 環境變數缺失所致 (預設為 `"default"`) |
+| Relay Service 不可達 | 檢查 `RELAY_SERVICE_URL` 環境變數；確認 relay service 執行中：`curl http://localhost:5020/health`；VP 會自動退回本地 ffmpeg |
+| NVENC 編碼器無法使用 | 檢查 `USE_NVENC` 環境變數；確認 `--runtime=nvidia`；查看 relay service 日誌；設 `USE_NVENC=false` 退回 libx264 |

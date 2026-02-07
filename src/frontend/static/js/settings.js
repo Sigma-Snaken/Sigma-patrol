@@ -168,8 +168,9 @@ async function saveSettings() {
     }
 }
 
-// --- Test Live Monitor ---
-let _testLiveMonitorPollId = null;
+// --- Test Live Monitor (relay → VILA JPS → WebSocket alerts) ---
+let _testStatusPollId = null;
+let _testSnapshotPollId = null;
 
 export async function testLiveMonitor() {
     const btn = document.getElementById('btn-test-live-monitor');
@@ -177,10 +178,12 @@ export async function testLiveMonitor() {
     const resultsEl = document.getElementById('live-monitor-test-results');
 
     // If already running, stop it
-    if (_testLiveMonitorPollId) {
+    if (_testStatusPollId) {
         await fetch(`/api/${state.selectedRobotId}/test_live_monitor/stop`, { method: 'POST' });
-        clearInterval(_testLiveMonitorPollId);
-        _testLiveMonitorPollId = null;
+        clearInterval(_testStatusPollId);
+        if (_testSnapshotPollId) clearInterval(_testSnapshotPollId);
+        _testStatusPollId = null;
+        _testSnapshotPollId = null;
         btn.textContent = 'Test Live Monitor';
         btn.classList.remove('btn-danger');
         statusEl.textContent = 'Stopped';
@@ -188,13 +191,17 @@ export async function testLiveMonitor() {
     }
 
     // Read current form values
-    const vilaAlertUrl = document.getElementById('setting-vila-alert-url')?.value || '';
+    const vilaJpsUrl = document.getElementById('setting-vila-jps-url')?.value || '';
     const rulesText = document.getElementById('setting-live-monitor-rules')?.value || '';
-    const interval = parseInt(document.getElementById('setting-live-monitor-interval')?.value || '5', 10);
     const rules = rulesText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
 
-    if (!vilaAlertUrl) {
-        alert('Please enter a VILA Alert URL first.');
+    // Determine stream source from radio buttons
+    const radioExternal = document.getElementById('setting-stream-source-external');
+    const streamSource = radioExternal?.checked ? 'external_rtsp' : 'robot_camera';
+    const externalRtspUrl = document.getElementById('setting-external-rtsp-url')?.value || '';
+
+    if (!vilaJpsUrl) {
+        alert('Please enter a VILA JPS URL first.');
         return;
     }
     if (rules.length === 0) {
@@ -203,15 +210,20 @@ export async function testLiveMonitor() {
     }
 
     // Start test
-    statusEl.textContent = 'Starting...';
+    statusEl.textContent = 'Starting relay...';
     resultsEl.style.display = 'block';
-    resultsEl.innerHTML = '';
+    resultsEl.innerHTML =
+        '<div id="test-snapshot-container" style="text-align:center; margin-bottom:8px;">' +
+            '<img id="test-snapshot-img" style="max-width:100%; max-height:240px; border-radius:6px; display:none; margin:0 auto;">' +
+            '<div id="test-snapshot-placeholder" style="color:var(--text-muted); padding:20px; font-size:12px;">Waiting for stream...</div>' +
+        '</div>' +
+        '<div id="test-alerts-container" style="border-top:1px solid var(--border-subtle); padding-top:6px;"></div>';
 
     try {
         const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vila_alert_url: vilaAlertUrl, rules, interval }),
+            body: JSON.stringify({ vila_jps_url: vilaJpsUrl, rules, stream_source: streamSource, external_rtsp_url: externalRtspUrl }),
         });
         const data = await res.json();
         if (!res.ok || data.error) {
@@ -225,55 +237,74 @@ export async function testLiveMonitor() {
 
     btn.textContent = 'Stop Test';
     btn.classList.add('btn-danger');
-    statusEl.textContent = 'Running...';
+    statusEl.textContent = 'Connecting to VILA JPS...';
 
-    let lastCheckCount = 0;
+    let lastAlertCount = 0;
 
-    // Poll for results
-    _testLiveMonitorPollId = setInterval(async () => {
+    // Poll for snapshot every 1s
+    _testSnapshotPollId = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/snapshot`);
+            if (res.ok && res.status !== 204) {
+                const blob = await res.blob();
+                if (blob.size > 0) {
+                    const img = document.getElementById('test-snapshot-img');
+                    const placeholder = document.getElementById('test-snapshot-placeholder');
+                    if (img) {
+                        const oldSrc = img.src;
+                        img.src = URL.createObjectURL(blob);
+                        img.style.display = 'block';
+                        if (oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+                    }
+                    if (placeholder) placeholder.style.display = 'none';
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }, 1000);
+
+    // Poll for status + alerts every 2s
+    _testStatusPollId = setInterval(async () => {
         try {
             const res = await fetch(`/api/${state.selectedRobotId}/test_live_monitor/status`);
             const status = await res.json();
 
-            if (!status.active && _testLiveMonitorPollId) {
-                clearInterval(_testLiveMonitorPollId);
-                _testLiveMonitorPollId = null;
+            if (!status.active && _testStatusPollId) {
+                clearInterval(_testStatusPollId);
+                if (_testSnapshotPollId) clearInterval(_testSnapshotPollId);
+                _testStatusPollId = null;
+                _testSnapshotPollId = null;
                 btn.textContent = 'Test Live Monitor';
                 btn.classList.remove('btn-danger');
-                statusEl.textContent = 'Stopped';
+                statusEl.textContent = status.error ? 'Error: ' + status.error : 'Stopped';
                 return;
             }
 
-            statusEl.textContent = `Running... (${status.check_count} checks)`;
-            if (status.error) {
-                statusEl.textContent += ` | Error: ${status.error}`;
-            }
+            const wsLabel = status.ws_connected ? 'WS Connected' : 'WS Connecting...';
+            statusEl.textContent = `${wsLabel} | Alerts: ${status.alert_count}`;
+            if (status.error) statusEl.textContent += ` | ${status.error}`;
 
-            // Append only new results
-            const newResults = status.results.filter(r => r.check_id > lastCheckCount);
-            for (const entry of newResults) {
-                const lines = entry.responses.map(r => {
-                    const a = r.answer.toLowerCase();
-                    const isYes = a.startsWith('yes') || a.startsWith('true') || a.startsWith('1');
-                    const label = isYes ? 'YES' : 'NO';
-                    const color = isYes ? 'var(--coral, #e74c3c)' : 'var(--green, #2ecc71)';
-                    return `<span style="color:${color}; font-weight:600;">[${label}]</span> ${escapeHtml(r.rule)}`;
-                }).join('<br>');
-                const imgHtml = entry.image
-                    ? `<img src="${entry.image}" style="max-width:160px; border-radius:4px; margin-top:4px; display:block;">`
-                    : '';
-                resultsEl.innerHTML += `<div style="margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border-subtle); display:flex; gap:10px; align-items:flex-start;">` +
-                    `${imgHtml}` +
-                    `<div><div style="color:var(--text-muted); margin-bottom:2px;">#${entry.check_id} — ${escapeHtml(entry.timestamp)}</div>` +
-                    `${lines}</div></div>`;
-                lastCheckCount = entry.check_id;
+            // Append new alerts
+            const alertsContainer = document.getElementById('test-alerts-container');
+            if (alertsContainer && status.alerts.length > lastAlertCount) {
+                const newAlerts = status.alerts.slice(lastAlertCount);
+                for (const a of newAlerts) {
+                    const imgHtml = a.image
+                        ? `<img src="${a.image}" style="max-width:120px; border-radius:4px; flex-shrink:0;">`
+                        : '';
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin-bottom:6px; padding:6px 8px; background:rgba(231,76,60,0.08); border-left:3px solid var(--coral); border-radius:4px; display:flex; gap:8px; align-items:flex-start;';
+                    div.innerHTML =
+                        imgHtml +
+                        `<div>` +
+                            `<div style="color:var(--coral); font-weight:600; font-size:12px;">${escapeHtml(a.rule)}</div>` +
+                            `<div style="color:var(--text-muted); font-size:11px;">${escapeHtml(a.timestamp)}</div>` +
+                        `</div>`;
+                    alertsContainer.appendChild(div);
+                }
+                lastAlertCount = status.alerts.length;
+                resultsEl.scrollTop = resultsEl.scrollHeight;
             }
-
-            // Auto-scroll to bottom
-            resultsEl.scrollTop = resultsEl.scrollHeight;
-        } catch (e) {
-            // ignore poll errors
-        }
+        } catch (e) { /* ignore */ }
     }, 2000);
 }
 window.testLiveMonitor = testLiveMonitor;

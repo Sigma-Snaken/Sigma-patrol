@@ -348,9 +348,13 @@ class PatrolService:
 
         # Live monitor setup (VILA JPS API + RTSP relay)
         from live_monitor import live_monitor
-        from relay_manager import relay_manager
+        from relay_manager import relay_manager, relay_service_client
         from config import MEDIAMTX_INTERNAL, MEDIAMTX_EXTERNAL
         live_monitor_active = False
+        use_relay_service = relay_service_client and relay_service_client.is_available()
+
+        if relay_service_client and not use_relay_service:
+            logger.warning("Relay service configured but not reachable, falling back to local RelayManager")
 
         tg_config = None
         if settings.get("enable_telegram"):
@@ -364,8 +368,15 @@ class PatrolService:
 
             if settings.get("enable_robot_camera_relay"):
                 try:
-                    rtsp_path = relay_manager.start_robot_camera_relay(
-                        ROBOT_ID, robot_service.get_front_camera_image, MEDIAMTX_INTERNAL)
+                    key = f"{ROBOT_ID}/camera"
+                    if use_relay_service:
+                        rtsp_path, err = relay_service_client.start_relay(key, "robot_camera")
+                        if err:
+                            raise RuntimeError(err)
+                        relay_service_client.start_frame_feeder(key, robot_service.get_front_camera_image)
+                    else:
+                        rtsp_path = relay_manager.start_robot_camera_relay(
+                            ROBOT_ID, robot_service.get_front_camera_image, MEDIAMTX_INTERNAL)
                     streams.append({
                         "rtsp_url": f"rtsp://{MEDIAMTX_EXTERNAL}{rtsp_path}",
                         "name": f"{ROBOT_NAME} Camera",
@@ -378,8 +389,14 @@ class PatrolService:
             ext_url = settings.get("external_rtsp_url", "")
             if settings.get("enable_external_rtsp") and ext_url:
                 try:
-                    rtsp_path = relay_manager.start_external_rtsp_relay(
-                        ROBOT_ID, ext_url, MEDIAMTX_INTERNAL)
+                    key = f"{ROBOT_ID}/external"
+                    if use_relay_service:
+                        rtsp_path, err = relay_service_client.start_relay(key, "external_rtsp", source_url=ext_url)
+                        if err:
+                            raise RuntimeError(err)
+                    else:
+                        rtsp_path = relay_manager.start_external_rtsp_relay(
+                            ROBOT_ID, ext_url, MEDIAMTX_INTERNAL)
                     streams.append({
                         "rtsp_url": f"rtsp://{MEDIAMTX_EXTERNAL}{rtsp_path}",
                         "name": "External Camera",
@@ -388,9 +405,22 @@ class PatrolService:
                 except Exception as e:
                     logger.error(f"Failed to start external RTSP relay: {e}")
 
-            # Wait for streams to establish
+            # Wait for streams to be live on mediamtx before registering with JPS
             if streams:
-                time.sleep(3)
+                from relay_manager import wait_for_stream
+                verified = []
+                for s in streams:
+                    s_key = s["rtsp_url"].split(MEDIAMTX_EXTERNAL)[-1].lstrip("/")
+                    if use_relay_service:
+                        ready = relay_service_client.wait_for_stream(s_key, timeout=15)
+                    else:
+                        rtsp_internal = s["rtsp_url"].replace(MEDIAMTX_EXTERNAL, MEDIAMTX_INTERNAL)
+                        ready = wait_for_stream(rtsp_internal, max_wait=15)
+                    if ready:
+                        verified.append(s)
+                    else:
+                        logger.error(f"Stream not available on mediamtx: {s['name']}")
+                streams = verified
 
             rules = settings.get("live_monitor_rules", [])
             if streams and rules:
@@ -452,7 +482,10 @@ class PatrolService:
                     logger.error(f"Error stopping live monitor: {e}")
             # Ensure RTSP relays are always stopped
             try:
-                relay_manager.stop_all()
+                if use_relay_service:
+                    relay_service_client.stop_all()
+                else:
+                    relay_manager.stop_all()
             except Exception as e:
                 logger.error(f"Error stopping relays: {e}")
             # Ensure video recorder is always stopped

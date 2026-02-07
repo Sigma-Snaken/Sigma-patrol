@@ -2,7 +2,7 @@
 Live Monitor - Background camera monitoring via VILA JPS Alert API during patrol.
 
 Uses VILA JPS Stream API + Alert API + WebSocket for efficient continuous monitoring.
-The legacy chat-completions approach is retained for TestLiveMonitor (settings page quick test).
+TestLiveMonitor uses the same JPS flow for settings page quick test (no DB writes).
 """
 
 import base64
@@ -23,67 +23,10 @@ from utils import get_current_time_str
 
 logger = get_logger("live_monitor", "live_monitor.log")
 
-_VALID_RESPONSES = {"yes", "no", "0", "1", "true", "false"}
-
-ALERT_SYSTEM_PROMPT = (
-    "You are an AI assistant whose job is to evaluate a yes/no question on an image. "
-    "Your response must be accurate and based on the image and MUST be 'yes' or 'no'. "
-    "Do not respond with any numbers."
-)
-
 MAX_RULES = 10
 WS_PORT = 5016
 WS_RECONNECT_DELAY = 5
 WS_MAX_RECONNECTS = 10
-
-
-def _call_vila_chat(vila_url, data_url, rules, timeout=30, max_retries=1):
-    """Call VILA chat completions once per rule (OpenAI-compatible).
-
-    Uses NVIDIA-recommended settings: max_tokens=1, min_tokens=1, system prompt,
-    and retry logic for non-boolean responses.
-    Returns list of answer strings, one per rule.
-    """
-    url = f"{vila_url}/v1/chat/completions"
-    answers = []
-
-    for rule in rules:
-        answer = ""
-        for attempt in range(max_retries + 1):
-            messages = [
-                {"role": "system", "content": ALERT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                        {"type": "text", "text": rule},
-                    ],
-                },
-            ]
-            body = {
-                "messages": messages,
-                "max_tokens": 1,
-                "min_tokens": 1,
-            }
-
-            try:
-                resp = requests.post(url, json=body, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                answer = content.strip().rstrip(".").strip()
-
-                if answer.lower() in _VALID_RESPONSES:
-                    break
-                logger.warning(f"VILA non-boolean response '{answer}' for rule '{rule}', retry {attempt + 1}")
-            except Exception as e:
-                logger.error(f"VILA chat error for rule '{rule}': {e}")
-                answer = ""
-                break
-
-        answers.append(answer)
-
-    return answers
 
 
 class LiveMonitor:
@@ -146,17 +89,23 @@ class LiveMonitor:
         # 0. Clean up any stale streams from previous runs
         self._cleanup_stale_streams(vila_jps_url)
 
-        # 1. Register each stream
+        # 1. Register each stream (with retry — gstDecoder may need time)
         for stream in streams:
-            try:
-                stream_id = self._register_stream(vila_jps_url, stream["rtsp_url"], stream["name"])
-                if stream_id:
-                    self._stream_ids.append((stream_id, stream))
-                    logger.info(f"Registered stream: {stream['name']} -> stream_id={stream_id}")
-                else:
-                    logger.error(f"Failed to register stream: {stream['name']}")
-            except Exception as e:
-                logger.error(f"Error registering stream {stream['name']}: {e}")
+            stream_id = None
+            for attempt in range(1, 4):
+                try:
+                    stream_id = self._register_stream(vila_jps_url, stream["rtsp_url"], stream["name"])
+                    if stream_id:
+                        self._stream_ids.append((stream_id, stream))
+                        logger.info(f"Registered stream (attempt {attempt}): {stream['name']} -> stream_id={stream_id}")
+                        break
+                    logger.warning(f"JPS registration returned no id for {stream['name']} (attempt {attempt}/3)")
+                except Exception as e:
+                    logger.warning(f"JPS registration failed for {stream['name']} (attempt {attempt}/3): {e}")
+                if attempt < 3:
+                    time.sleep(5)
+            if not stream_id:
+                logger.error(f"Failed to register stream after 3 attempts: {stream['name']}")
 
         if not self._stream_ids:
             logger.error("No streams registered, aborting LiveMonitor start")
@@ -449,103 +398,471 @@ class LiveMonitor:
 live_monitor = LiveMonitor()
 
 
-# === Legacy Test Monitor (settings page quick test via chat completions) ===
+# === Test Monitor (settings page: relay → VILA JPS → WebSocket alerts) ===
 
 class TestLiveMonitor:
-    """Lightweight test monitor for settings page - no DB writes, keeps results in memory."""
+    """Test monitor for settings page using VILA JPS flow. No DB writes, keeps alerts in memory.
 
-    MAX_RESULTS = 50
+    Flow: start relay → register stream with JPS → set alert rules → WebSocket listener.
+    Also pulls snapshot frames from mediamtx RTSP to verify relay pipeline.
+    """
+
+    MAX_ALERTS = 100
+    SNAPSHOT_INTERVAL = 0.5  # seconds between RTSP frame grabs
 
     def __init__(self):
         self.is_running = False
-        self._thread = None
-        self._lock = threading.Lock()
-        self.results = []
+        self.alerts = []
         self.error = None
-        self.check_count = 0
+        self.ws_connected = False
+        self._lock = threading.Lock()
+        self._latest_frame = None  # JPEG bytes from mediamtx
+        self._ws_thread = None
+        self._ws = None
+        self._ws_stop = threading.Event()
+        self._snapshot_thread = None
+        self._snapshot_stop = threading.Event()
+        self._jps_thread = None
+        self._stream_id = None
+        self._relay_key = None
+        self._config = None
+        self._use_relay_service = False
 
-    def start(self, vila_alert_url, rules, frame_func, interval=5.0):
+    def start(self, config):
+        """Start test monitor: relay → JPS → WebSocket.
+
+        Args:
+            config: dict with keys:
+                vila_jps_url: str - VILA JPS base URL
+                rules: list[str] - alert rule strings
+                stream_source: str - "robot_camera" or "external_rtsp"
+                external_rtsp_url: str - external RTSP URL (if stream_source == "external_rtsp")
+                robot_id: str - robot identifier
+                frame_func: callable - returns gRPC image (for robot_camera relay)
+                mediamtx_internal: str - mediamtx host:port (ffmpeg push target)
+                mediamtx_external: str - mediamtx host:port (VILA pull source)
+        """
         if self.is_running:
             return
-        self.vila_alert_url = vila_alert_url.rstrip("/")
-        self.rules = list(rules)
-        self.frame_func = frame_func
-        self.interval = interval
-        self.results = []
+
+        self._config = config
+        self.alerts = []
         self.error = None
-        self.check_count = 0
+        self.ws_connected = False
+        self._latest_frame = None
+        self._stream_id = None
+        self._relay_key = None
+        self._ws_stop.clear()
+        self._snapshot_stop.clear()
+
+        stream_source = config.get("stream_source", "robot_camera")
+
+        # Validate source availability early
+        if stream_source == "external_rtsp":
+            if not config.get("external_rtsp_url"):
+                self.error = "External RTSP URL not configured"
+                return
+        else:
+            if not config.get("frame_func"):
+                self.error = "Robot camera not available"
+                return
+
+        # 1. Start snapshot immediately (reads directly from source, no mediamtx)
         self.is_running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-        logger.info(f"TestLiveMonitor started: url={self.vila_alert_url}, rules={len(self.rules)}, interval={interval}s")
+        self._snapshot_thread = threading.Thread(target=self._snapshot_loop, daemon=True)
+        self._snapshot_thread.start()
+        logger.info("Snapshot capture started — video preview available")
+
+        # 2. Relay + JPS registration + WebSocket in background (don't block response)
+        self._jps_thread = threading.Thread(
+            target=self._jps_setup,
+            args=(config,),
+            daemon=True,
+        )
+        self._jps_thread.start()
+
+    def _jps_setup(self, config):
+        """Background: start relay → wait for mediamtx → register with JPS → rules → WebSocket."""
+        vila_jps_url = config["vila_jps_url"].rstrip("/")
+        rules = config["rules"]
+        stream_source = config.get("stream_source", "robot_camera")
+        robot_id = config["robot_id"]
+        mediamtx_internal = config["mediamtx_internal"]
+        mediamtx_external = config["mediamtx_external"]
+
+        # 1. Start relay (ffmpeg → mediamtx)
+        from relay_manager import relay_manager, relay_service_client, wait_for_stream
+
+        use_relay_service = relay_service_client and relay_service_client.is_available()
+        self._use_relay_service = use_relay_service
+
+        if relay_service_client and not use_relay_service:
+            logger.warning("Relay service configured but not reachable, falling back to local RelayManager")
+
+        try:
+            if stream_source == "external_rtsp":
+                ext_url = config.get("external_rtsp_url", "")
+                self._relay_key = f"{robot_id}/external"
+                if use_relay_service:
+                    rtsp_path, err = relay_service_client.start_relay(self._relay_key, "external_rtsp", source_url=ext_url)
+                    if err:
+                        raise RuntimeError(err)
+                else:
+                    rtsp_path = relay_manager.start_external_rtsp_relay(
+                        robot_id, ext_url, mediamtx_internal)
+            else:
+                frame_func = config.get("frame_func")
+                self._relay_key = f"{robot_id}/camera"
+                if use_relay_service:
+                    rtsp_path, err = relay_service_client.start_relay(self._relay_key, "robot_camera")
+                    if err:
+                        raise RuntimeError(err)
+                    relay_service_client.start_frame_feeder(self._relay_key, frame_func)
+                else:
+                    rtsp_path = relay_manager.start_robot_camera_relay(
+                        robot_id, frame_func, mediamtx_internal)
+        except Exception as e:
+            with self._lock:
+                self.error = f"Relay start failed: {e}"
+            logger.error(self.error)
+            return
+
+        rtsp_url_for_jps = f"rtsp://{mediamtx_external}{rtsp_path}"
+        rtsp_check_url = f"rtsp://{mediamtx_internal}{rtsp_path}"
+        logger.info(f"Relay started: JPS will pull from {rtsp_url_for_jps}")
+
+        # 2. Wait for stream on mediamtx
+        if not self.is_running:
+            return
+        if use_relay_service:
+            stream_ready = relay_service_client.wait_for_stream(self._relay_key, timeout=20)
+        else:
+            stream_ready = wait_for_stream(rtsp_check_url, max_wait=20)
+        if not stream_ready:
+            with self._lock:
+                self.error = "Relay stream not available on mediamtx (timeout 20s)"
+            logger.error(self.error)
+            self._stop_relay()
+            return
+
+        # 3. Cleanup stale JPS streams
+        try:
+            self._cleanup_stale_streams(vila_jps_url)
+        except Exception as e:
+            logger.warning(f"Stale stream cleanup failed: {e}")
+
+        # 4. Register stream with JPS (retry — gstDecoder may need time)
+        stream_name = f"Test-{robot_id}"
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            if not self.is_running:
+                return
+            try:
+                self._stream_id = self._register_stream(vila_jps_url, rtsp_url_for_jps, stream_name)
+                if self._stream_id:
+                    logger.info(f"Registered test stream (attempt {attempt}): {stream_name} -> stream_id={self._stream_id}")
+                    break
+                logger.warning(f"JPS registration returned no id (attempt {attempt}/{max_attempts})")
+            except Exception as e:
+                logger.warning(f"JPS registration failed (attempt {attempt}/{max_attempts}): {e}")
+                self._stream_id = None
+
+            if attempt < max_attempts:
+                for _ in range(10):
+                    if not self.is_running:
+                        return
+                    time.sleep(1)
+
+        if not self._stream_id:
+            with self._lock:
+                self.error = "Failed to register stream with VILA JPS after retries"
+            logger.error(self.error)
+            return
+
+        # 5. Set alert rules
+        try:
+            self._set_alert_rules(vila_jps_url, self._stream_id, rules)
+            logger.info(f"Set {len(rules)} alert rules for test stream")
+        except Exception as e:
+            with self._lock:
+                self.error = f"Failed to set alert rules: {e}"
+            logger.error(self.error)
+            return
+
+        # 6. Start WebSocket listener
+        self._ws_thread = threading.Thread(target=self._ws_listener, daemon=True)
+        self._ws_thread.start()
+        logger.info(f"JPS setup complete: stream_id={self._stream_id}")
 
     def stop(self):
         if not self.is_running:
             return
+
         self.is_running = False
-        if self._thread:
-            self._thread.join(timeout=10)
-            self._thread = None
-        logger.info(f"TestLiveMonitor stopped after {self.check_count} checks")
+        self._ws_stop.set()
+        self._snapshot_stop.set()
+
+        # Close WebSocket
+        if self._ws:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+        if self._ws_thread:
+            self._ws_thread.join(timeout=10)
+            self._ws_thread = None
+
+        if self._jps_thread:
+            self._jps_thread.join(timeout=15)
+            self._jps_thread = None
+
+        if self._snapshot_thread:
+            self._snapshot_thread.join(timeout=5)
+            self._snapshot_thread = None
+
+        # Deregister stream from JPS
+        if self._stream_id and self._config:
+            vila_jps_url = self._config["vila_jps_url"].rstrip("/")
+            try:
+                self._deregister_stream(vila_jps_url, self._stream_id)
+                logger.info(f"Deregistered test stream: {self._stream_id}")
+            except Exception as e:
+                logger.warning(f"Test stream deregister failed: {e}")
+
+        # Stop relay
+        self._stop_relay()
+
+        self._latest_frame = None
+        self._stream_id = None
+        logger.info(f"TestLiveMonitor stopped. Alerts: {len(self.alerts)}")
 
     def get_status(self):
         with self._lock:
             return {
                 "active": self.is_running,
-                "check_count": self.check_count,
+                "ws_connected": self.ws_connected,
+                "alert_count": len(self.alerts),
+                "alerts": list(self.alerts),
                 "error": self.error,
-                "results": list(self.results),
             }
 
-    def _loop(self):
-        while self.is_running:
-            start = time.time()
-            try:
-                self._check_once()
-            except Exception as e:
-                logger.error(f"TestLiveMonitor error: {e}")
-                with self._lock:
-                    self.error = str(e)
-            elapsed = time.time() - start
-            sleep_time = max(0, self.interval - elapsed)
-            end_sleep = time.time() + sleep_time
-            while time.time() < end_sleep and self.is_running:
-                time.sleep(0.5)
+    def get_snapshot(self):
+        """Return latest JPEG bytes captured from mediamtx, or None."""
+        with self._lock:
+            return self._latest_frame
 
-    def _check_once(self):
-        img_response = self.frame_func()
-        if not img_response or not img_response.data:
-            with self._lock:
-                self.error = "Camera not available"
+    # --- Internal helpers ---
+
+    def _stop_relay(self):
+        """Stop only the relay started by this test."""
+        if self._relay_key:
+            try:
+                if getattr(self, '_use_relay_service', False):
+                    from relay_manager import relay_service_client
+                    if relay_service_client:
+                        relay_service_client.stop_frame_feeder(self._relay_key)
+                        relay_service_client.stop_relay(self._relay_key)
+                else:
+                    from relay_manager import relay_manager
+                    relay_manager.stop_relay(self._relay_key)
+            except Exception as e:
+                logger.warning(f"Relay stop failed: {e}")
+            self._relay_key = None
+
+    def _snapshot_loop(self):
+        """Background thread: capture frames for live preview directly from source.
+
+        Robot camera: gRPC frame_func() → JPEG bytes (no mediamtx round-trip).
+        External camera: OpenCV reads source RTSP URL directly.
+        """
+        stream_source = self._config.get("stream_source", "robot_camera")
+
+        if stream_source == "robot_camera":
+            self._snapshot_loop_robot()
+        else:
+            self._snapshot_loop_external()
+
+    def _snapshot_loop_robot(self):
+        """Capture frames from robot camera via gRPC."""
+        frame_func = self._config.get("frame_func")
+        if not frame_func:
             return
 
-        b64 = base64.b64encode(img_response.data).decode()
-        data_url = f"data:image/jpeg;base64,{b64}"
+        while not self._snapshot_stop.is_set():
+            try:
+                img = frame_func()
+                if img and img.data:
+                    with self._lock:
+                        self._latest_frame = img.data  # already JPEG
+            except Exception as e:
+                logger.debug(f"Snapshot capture error (gRPC): {e}")
+            self._snapshot_stop.wait(self.SNAPSHOT_INTERVAL)
 
-        alert_responses = _call_vila_chat(self.vila_alert_url, data_url, self.rules)
+    def _snapshot_loop_external(self):
+        """Capture frames from mediamtx relay (Docker bridge can't reach camera directly)."""
+        mediamtx_internal = self._config.get("mediamtx_internal", "")
+        robot_id = self._config.get("robot_id", "")
+        if not mediamtx_internal or not robot_id:
+            return
+        ext_url = f"rtsp://{mediamtx_internal}/{robot_id}/external"
+        logger.info(f"External snapshot will pull from mediamtx: {ext_url}")
 
-        timestamp = get_current_time_str()
-        self.check_count += 1
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        cap = None
+        while not self._snapshot_stop.is_set():
+            try:
+                if cap is None or not cap.isOpened():
+                    cap = cv2.VideoCapture(ext_url, cv2.CAP_FFMPEG)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    if not cap.isOpened():
+                        logger.warning(f"Failed to open external RTSP: {ext_url}")
+                        self._snapshot_stop.wait(3)
+                        continue
 
-        entry = {
-            "check_id": self.check_count,
-            "timestamp": timestamp,
-            "image": data_url,
-            "responses": [],
-        }
-        for i, response_text in enumerate(alert_responses):
-            if i >= len(self.rules):
-                break
-            entry["responses"].append({
-                "rule": self.rules[i],
-                "answer": response_text.strip(),
-            })
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    with self._lock:
+                        self._latest_frame = buf.tobytes()
+                else:
+                    cap.release()
+                    cap = None
+
+            except Exception as e:
+                logger.debug(f"Snapshot capture error (RTSP): {e}")
+                if cap:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+                    cap = None
+
+            self._snapshot_stop.wait(self.SNAPSHOT_INTERVAL)
+
+        if cap:
+            try:
+                cap.release()
+            except Exception:
+                pass
+
+    # --- VILA JPS API (same as LiveMonitor) ---
+
+    def _cleanup_stale_streams(self, vila_jps_url):
+        url = f"{vila_jps_url}/api/v1/live-stream"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        for s in resp.json():
+            sid = s.get("id")
+            if sid:
+                try:
+                    self._deregister_stream(vila_jps_url, sid)
+                    logger.info(f"Cleaned up stale stream: {sid}")
+                except Exception:
+                    pass
+
+    def _register_stream(self, vila_jps_url, rtsp_url, name):
+        url = f"{vila_jps_url}/api/v1/live-stream"
+        body = {"liveStreamUrl": rtsp_url, "name": name}
+        resp = requests.post(url, json=body, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("id") or data.get("stream_id")
+
+    def _set_alert_rules(self, vila_jps_url, stream_id, rules):
+        url = f"{vila_jps_url}/api/v1/alerts"
+        body = {"alerts": rules, "id": stream_id}
+        resp = requests.post(url, json=body, timeout=15)
+        resp.raise_for_status()
+
+    def _deregister_stream(self, vila_jps_url, stream_id):
+        url = f"{vila_jps_url}/api/v1/live-stream/{stream_id}"
+        resp = requests.delete(url, timeout=10)
+        resp.raise_for_status()
+
+    # --- WebSocket Listener ---
+
+    def _ws_listener(self):
+        vila_jps_url = self._config["vila_jps_url"].rstrip("/")
+        parsed = urlparse(vila_jps_url)
+        ws_host = parsed.hostname
+        ws_url = f"ws://{ws_host}:{WS_PORT}/api/v1/alerts/ws"
+
+        reconnect_count = 0
+
+        while not self._ws_stop.is_set() and reconnect_count < WS_MAX_RECONNECTS:
+            try:
+                logger.info(f"Test WS connecting: {ws_url}")
+                self._ws = websocket.WebSocket()
+                self._ws.settimeout(5)
+                self._ws.connect(ws_url)
+                with self._lock:
+                    self.ws_connected = True
+                logger.info("Test WS connected")
+                reconnect_count = 0
+
+                while not self._ws_stop.is_set():
+                    try:
+                        raw = self._ws.recv()
+                        if not raw:
+                            continue
+                        self._handle_ws_event(raw)
+                    except websocket.WebSocketTimeoutException:
+                        continue
+                    except websocket.WebSocketConnectionClosedException:
+                        logger.warning("Test WS closed by server")
+                        break
+
+            except Exception as e:
+                if self._ws_stop.is_set():
+                    break
+                reconnect_count += 1
+                with self._lock:
+                    self.ws_connected = False
+                logger.warning(f"Test WS error (attempt {reconnect_count}/{WS_MAX_RECONNECTS}): {e}")
+                self._ws_stop.wait(WS_RECONNECT_DELAY)
 
         with self._lock:
-            self.error = None
-            self.results.append(entry)
-            if len(self.results) > self.MAX_RESULTS:
-                self.results = self.results[-self.MAX_RESULTS:]
+            self.ws_connected = False
+
+        if reconnect_count >= WS_MAX_RECONNECTS:
+            logger.error("Test WS max reconnects exceeded")
+            with self._lock:
+                self.error = "WebSocket max reconnects exceeded"
+
+    def _handle_ws_event(self, raw):
+        """Process a single WebSocket alert event (no DB writes, memory only)."""
+        try:
+            event = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.debug(f"Non-JSON WS message: {raw[:200]}")
+            return
+
+        rule_string = event.get("rule_string") or event.get("alert") or event.get("rule", "")
+        if not rule_string:
+            return
+
+        timestamp = get_current_time_str()
+
+        # Attach current snapshot as evidence
+        image_b64 = None
+        with self._lock:
+            if self._latest_frame:
+                image_b64 = base64.b64encode(self._latest_frame).decode()
+
+        alert_entry = {
+            "rule": rule_string,
+            "timestamp": timestamp,
+            "image": f"data:image/jpeg;base64,{image_b64}" if image_b64 else None,
+        }
+
+        with self._lock:
+            self.alerts.append(alert_entry)
+            if len(self.alerts) > self.MAX_ALERTS:
+                self.alerts = self.alerts[-self.MAX_ALERTS:]
+
+        logger.info(f"Test alert: rule='{rule_string}' at {timestamp}")
 
 
 test_live_monitor = TestLiveMonitor()

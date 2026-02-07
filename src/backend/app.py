@@ -201,7 +201,7 @@ def test_ai_route():
         return jsonify({"error": str(e)}), 500
 
 
-# --- Test Live Monitor API ---
+# --- Test Live Monitor API (relay → VILA JPS → WebSocket alerts) ---
 
 @app.route('/api/test_live_monitor/start', methods=['POST'])
 def test_live_monitor_start():
@@ -211,21 +211,33 @@ def test_live_monitor_start():
     data = request.json or {}
     settings = settings_service.get_all()
 
-    vila_alert_url = data.get('vila_alert_url') or settings.get('vila_alert_url', '')
-    if not vila_alert_url:
-        return jsonify({"error": "VILA Alert URL is required"}), 400
+    vila_jps_url = data.get('vila_jps_url') or settings.get('vila_jps_url', '')
+    if not vila_jps_url:
+        return jsonify({"error": "VILA JPS URL is required"}), 400
 
     rules = data.get('rules') or settings.get('live_monitor_rules', [])
     if not rules:
         return jsonify({"error": "At least one alert rule is required"}), 400
 
-    interval = data.get('interval') or settings.get('live_monitor_interval', 5)
+    stream_source = data.get('stream_source', 'robot_camera')
+    external_rtsp_url = data.get('external_rtsp_url') or settings.get('external_rtsp_url', '')
 
-    test_live_monitor.start(
-        vila_alert_url, rules,
-        robot_service.get_front_camera_image,
-        interval=float(interval),
-    )
+    test_live_monitor.start({
+        "vila_jps_url": vila_jps_url,
+        "rules": rules,
+        "stream_source": stream_source,
+        "external_rtsp_url": external_rtsp_url,
+        "robot_id": ROBOT_ID,
+        "frame_func": robot_service.get_front_camera_image,
+        "mediamtx_internal": MEDIAMTX_INTERNAL,
+        "mediamtx_external": MEDIAMTX_EXTERNAL,
+    })
+
+    if test_live_monitor.error:
+        err = test_live_monitor.error
+        test_live_monitor.error = None
+        return jsonify({"error": err}), 500
+
     return jsonify({"status": "started"})
 
 
@@ -238,6 +250,15 @@ def test_live_monitor_stop():
 @app.route('/api/test_live_monitor/status', methods=['GET'])
 def test_live_monitor_status():
     return jsonify(test_live_monitor.get_status())
+
+
+@app.route('/api/test_live_monitor/snapshot', methods=['GET'])
+def test_live_monitor_snapshot():
+    """Return latest JPEG frame captured from mediamtx RTSP relay."""
+    frame = test_live_monitor.get_snapshot()
+    if not frame:
+        return '', 204
+    return flask.Response(frame, mimetype='image/jpeg')
 
 
 # --- Relay & VILA Health API ---
