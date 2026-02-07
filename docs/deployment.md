@@ -14,7 +14,7 @@ Visual Patrol supports two deployment modes:
 - Docker Engine 24+ and Docker Compose v2
 - Network access to the Kachaka robot(s)
 - (Production) Network access to `ghcr.io` for pulling images
-- (Live monitor) VILA JPS server and mediamtx accessible from the deployment machine (deployed separately with the VILA JPS stack)
+- (Live monitor) VILA JPS server and mediamtx accessible from the deployment machine (mediamtx deployed standalone at `/home/nvidia/mediamtx/`)
 
 ## Development Setup
 
@@ -132,7 +132,15 @@ The `data/` and `logs/` directories are created automatically on first start.
 
 ### mediamtx (External Dependency)
 
-mediamtx is the RTSP relay server used for live monitoring. It is **not included** in visual-patrol's docker-compose files -- it is deployed separately as part of the VILA JPS stack, since VILA JPS pulls RTSP streams from mediamtx locally.
+mediamtx is the RTSP relay server used for live monitoring. It is **not included** in visual-patrol's docker-compose files -- it is deployed as a standalone compose at `/home/nvidia/mediamtx/compose.yaml` on the Jetson.
+
+```bash
+# Start mediamtx
+cd /home/nvidia/mediamtx && docker compose up -d
+
+# Check status
+docker compose -f /home/nvidia/mediamtx/compose.yaml ps
+```
 
 Visual Patrol connects to mediamtx via the `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXTERNAL` environment variables on each robot service. Ensure mediamtx is running and reachable at the configured addresses before enabling live monitoring.
 

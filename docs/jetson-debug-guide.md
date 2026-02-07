@@ -27,13 +27,15 @@ Reference for debugging the live monitoring pipeline on the Jetson deployment ma
     └── robot-a_video_recorder.log
 ```
 
-### mediamtx (external, deployed with VILA JPS stack)
+### mediamtx (standalone, `/home/nvidia/mediamtx/`)
 
-mediamtx is NOT part of visual-patrol's docker-compose. It runs separately alongside VILA JPS. Check the VILA JPS deployment for its docker-compose/container configuration.
+mediamtx is NOT part of visual-patrol's docker-compose. It runs as a standalone compose deployment.
 
+- **Compose file**: `/home/nvidia/mediamtx/compose.yaml`
 - **Port**: 8555 (changed from default 8554 to avoid conflict with JPS VST)
-- **Container name**: look for mediamtx in `docker ps`
+- **Container name**: `visual_patrol_mediamtx`
 - **RTSP URL format**: `rtsp://localhost:8555/{robot-id}/camera` or `rtsp://localhost:8555/{robot-id}/external`
+- **Manage**: `cd /home/nvidia/mediamtx && docker compose up -d` / `docker compose down`
 
 ### VILA JPS (external)
 
