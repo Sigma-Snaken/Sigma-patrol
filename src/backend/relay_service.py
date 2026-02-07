@@ -232,15 +232,36 @@ class RelayServiceManager:
             return None, str(e)
 
     def _start_external_rtsp(self, key, source_url, rtsp_url):
-        """Start ffmpeg for external RTSP relay (copy, no transcode)."""
-        cmd = [
-            "ffmpeg", "-y",
-            "-rtsp_transport", "tcp",
-            "-i", source_url,
-            "-c:v", "copy", "-an",
-            "-f", "rtsp", "-rtsp_transport", "tcp",
-            rtsp_url,
-        ]
+        """Start ffmpeg for external RTSP relay (transcode to clean H264)."""
+        if USE_NVENC:
+            cmd = [
+                "ffmpeg", "-y",
+                "-rtsp_transport", "tcp",
+                "-i", source_url,
+                "-an",
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                "-c:v", "h264_nvmpi",
+                "-b:v", "2M",
+                "-pix_fmt", "yuv420p",
+                "-f", "rtsp", "-rtsp_transport", "tcp",
+                rtsp_url,
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-rtsp_transport", "tcp",
+                "-i", source_url,
+                "-an",
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                "-c:v", "libx264",
+                "-preset", "ultrafast", "-tune", "zerolatency",
+                "-profile:v", "baseline", "-level", "3.1",
+                "-pix_fmt", "yuv420p",
+                "-x264-params", "keyint=30:min-keyint=30:repeat-headers=1",
+                "-bsf:v", "dump_extra",
+                "-f", "rtsp", "-rtsp_transport", "tcp",
+                rtsp_url,
+            ]
 
         logger.info(f"Starting external RTSP ffmpeg: {key}")
         try:
