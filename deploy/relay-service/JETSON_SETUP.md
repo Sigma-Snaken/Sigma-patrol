@@ -25,8 +25,8 @@ VP 透過 gRPC 擷取機器人相機畫面，以 HTTP POST 送至 Jetson 上的 
 Relay Service 對所有來源都進行轉碼（非 passthrough），確保輸出 H264 Baseline profile
 的乾淨串流，使 Jetson 的 NvMMLite 硬體解碼器能正確解析：
 
-- **robot_camera**: JPEG stdin → libx264/NVENC → RTSP
-- **external_rtsp**: 來源 RTSP → libx264/NVENC → RTSP（非 `-c:v copy`）
+- **robot_camera**: JPEG stdin → libx264/NVENC (5 fps) → RTSP
+- **external_rtsp**: 來源 RTSP → fps=5 → libx264/NVENC → RTSP（非 `-c:v copy`）
 
 ## 前置條件
 

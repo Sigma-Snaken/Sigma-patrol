@@ -128,8 +128,8 @@ Any backend can serve global requests because they all share the same database.
 ```
 1. Patrol starts
    ├── relay_manager starts relay (Jetson service or local ffmpeg)
-   │   ├── Robot camera: gRPC frames → ffmpeg transcode → mediamtx RTSP
-   │   └── External RTSP: source → ffmpeg transcode → mediamtx RTSP
+   │   ├── Robot camera: gRPC frames → ffmpeg transcode (5 fps) → mediamtx RTSP
+   │   └── External RTSP: source → ffmpeg transcode (5 fps) → mediamtx RTSP
    └── Wait for stream ready on mediamtx
 
 2. LiveMonitor.start()

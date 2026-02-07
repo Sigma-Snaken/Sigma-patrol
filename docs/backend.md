@@ -277,7 +277,7 @@ Manages ffmpeg subprocesses pushing camera streams to mediamtx RTSP server.
 
 **Robot camera relay:** Spawns ffmpeg with `image2pipe` input, `libx264 ultrafast` encoding, and RTSP TCP output. A feeder daemon thread calls `frame_func()` every 200ms (5 fps) and writes JPEG bytes to ffmpeg's stdin.
 
-**External RTSP relay:** Spawns ffmpeg with RTSP TCP input, `copy` video codec, no audio (`-an`), and RTSP TCP output.
+**External RTSP relay:** Spawns ffmpeg with RTSP TCP input, transcodes to H264 Baseline at 5 fps (matching robot camera), no audio (`-an`), and RTSP TCP output.
 
 **Auto-restart:** A background monitor thread checks every 10 seconds. Dead ffmpeg processes are restarted with exponential backoff (up to 3 retries).
 
