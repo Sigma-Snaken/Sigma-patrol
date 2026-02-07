@@ -46,7 +46,7 @@ Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google
 │  robot-c (Flask:5000)  ←→  Kachaka Robot C                   │
 │  (all share ./data volume with SQLite WAL)                   │
 ├─────────────────────────────────────────────────────────────┤
-│  mediamtx (RTSP relay server, port 8554/8555)                │
+│  mediamtx (external, deployed with VILA JPS stack)           │
 │  ├── /{robot-id}/camera   ← ffmpeg (gRPC JPEG → H.264)      │
 │  └── /{robot-id}/external ← ffmpeg (RTSP copy)              │
 │                                                              │
@@ -98,8 +98,6 @@ Add a new service to `docker-compose.yml`:
       - ROBOT_IP=192.168.50.135:26400
       - MEDIAMTX_INTERNAL=mediamtx:8554
       - MEDIAMTX_EXTERNAL=localhost:8554
-    depends_on:
-      - mediamtx
     restart: unless-stopped
 ```
 
@@ -110,7 +108,7 @@ Add `robot-d` to the nginx `depends_on` list, then `docker compose up -d`.
 ```
 visual-patrol/
 ├── nginx.conf                  # Dev reverse proxy config
-├── docker-compose.yml          # Dev: nginx + mediamtx + per-robot services (bridge network)
+├── docker-compose.yml          # Dev: nginx + per-robot services (bridge network)
 ├── Dockerfile                  # Backend image (Python 3.10, non-root user)
 ├── .dockerignore
 ├── src/
@@ -275,7 +273,7 @@ python src/backend/app.py
 | PDF generation failed | Check `logs/{robot-id}_app.log` |
 | Camera stream not loading | Enable "Continuous Camera Stream" in Settings; check robot connection |
 | Map not loading | Robot may still be connecting; check container logs for gRPC errors |
-| mediamtx port conflict | Change RTSP port via `MTX_RTSPADDRESS=:8555` env var on mediamtx service |
+| mediamtx not reachable | Ensure mediamtx is running (deployed with VILA JPS stack); check `MEDIAMTX_*` env vars |
 | Live monitor not triggering | Verify VILA JPS is running, streams are registered (`/api/relay/status`), and `vila_jps_url` is set |
 
 ## Documentation
@@ -288,6 +286,7 @@ Detailed documentation is available in the [`docs/`](docs/) directory:
 - [Backend Guide](docs/backend.md) -- Services, database schema, startup sequence
 - [Deployment Guide](docs/deployment.md) -- Dev and production setup, Docker, adding robots
 - [Configuration](docs/configuration.md) -- Environment variables, settings, per-robot config files
+- [Jetson Debug Guide](docs/jetson-debug-guide.md) -- RTSP relay + VILA JPS debugging on Jetson
 
 ## License
 

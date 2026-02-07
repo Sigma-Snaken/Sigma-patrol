@@ -27,7 +27,7 @@ Set per-service in `docker-compose.yml` (dev) or `deploy/docker-compose.prod.yam
 
 ### mediamtx Address Configuration
 
-The two `MEDIAMTX_*` variables exist because ffmpeg (inside the Flask container) and VILA JPS (external) may use different addresses to reach mediamtx:
+mediamtx is deployed externally as part of the VILA JPS stack (not included in visual-patrol's docker-compose files). The two `MEDIAMTX_*` variables exist because ffmpeg (inside the Flask container) and VILA JPS (external) may use different addresses to reach mediamtx:
 
 | Mode | `MEDIAMTX_INTERNAL` | `MEDIAMTX_EXTERNAL` | Reason |
 |------|---------------------|---------------------|--------|

@@ -14,7 +14,7 @@ Visual Patrol supports two deployment modes:
 - Docker Engine 24+ and Docker Compose v2
 - Network access to the Kachaka robot(s)
 - (Production) Network access to `ghcr.io` for pulling images
-- (Live monitor) VILA JPS server accessible from the deployment machine
+- (Live monitor) VILA JPS server and mediamtx accessible from the deployment machine (deployed separately with the VILA JPS stack)
 
 ## Development Setup
 
@@ -35,12 +35,11 @@ Open [http://localhost:5000](http://localhost:5000).
 ### How It Works
 
 - nginx binds port `5000` on the host
-- mediamtx binds port `8554` on the host (RTSP relay server)
 - Each robot service runs Flask on port `5000` internally (Docker bridge networking isolates them)
 - nginx resolves service names via Docker's internal DNS (`resolver 127.0.0.11`)
 - Docker service names **must** match `ROBOT_ID` values (e.g., service `robot-a` = env `ROBOT_ID=robot-a`)
 - All services mount `./src` for live code reloading and `./data` + `./logs` for persistent storage
-- `MEDIAMTX_INTERNAL=mediamtx:8554` (ffmpeg uses Docker DNS), `MEDIAMTX_EXTERNAL=localhost:8554` (VILA on host)
+- mediamtx runs externally (deployed with VILA JPS stack); `MEDIAMTX_INTERNAL` / `MEDIAMTX_EXTERNAL` env vars point robot services to it
 
 ### Adding a Robot (Dev)
 
@@ -63,8 +62,6 @@ Open [http://localhost:5000](http://localhost:5000).
       - ROBOT_IP=192.168.50.135:26400
       - MEDIAMTX_INTERNAL=mediamtx:8554
       - MEDIAMTX_EXTERNAL=localhost:8554
-    depends_on:
-      - mediamtx
     restart: unless-stopped
 ```
 
@@ -129,32 +126,17 @@ The `data/` and `logs/` directories are created automatically on first start.
 - All containers use `network_mode: host` (required for Jetson with `iptables: false`)
 - nginx listens on port 5000 on the host
 - Each Flask backend listens on a unique port via `PORT` env var (5001, 5002, ...)
-- mediamtx RTSP port is configurable via `MTX_RTSPADDRESS` (default `:8554`)
 - nginx routes by matching robot IDs in the URL to specific ports
 - Images are pulled from `ghcr.io/sigma-snaken/visual-patrol:latest`
 - All services use `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXTERNAL` pointing to `localhost:{port}`
 
-### mediamtx Configuration
+### mediamtx (External Dependency)
 
-The mediamtx service provides RTSP relay for live monitoring. Default configuration:
+mediamtx is the RTSP relay server used for live monitoring. It is **not included** in visual-patrol's docker-compose files -- it is deployed separately as part of the VILA JPS stack, since VILA JPS pulls RTSP streams from mediamtx locally.
 
-```yaml
-mediamtx:
-  image: bluenviron/mediamtx:latest
-  container_name: visual_patrol_mediamtx
-  network_mode: host
-  environment:
-    - MTX_RTSPADDRESS=:8555
-    - MTX_HLS=no
-    - MTX_WEBRTC=no
-    - MTX_RTMP=no
-    - MTX_SRT=no
-  restart: unless-stopped
-```
+Visual Patrol connects to mediamtx via the `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXTERNAL` environment variables on each robot service. Ensure mediamtx is running and reachable at the configured addresses before enabling live monitoring.
 
-**Port conflicts:** If the default RTSP port (8554) is already in use (e.g., by VILA JPS VST), change `MTX_RTSPADDRESS` to another port like `:8555` and update `MEDIAMTX_INTERNAL`/`MEDIAMTX_EXTERNAL` on all robot services to match.
-
-**Disabled protocols:** HLS, WebRTC, RTMP, and SRT are disabled (`no`) to prevent port conflicts with other services. Only RTSP is needed for the relay functionality.
+**Port conflicts:** If the default RTSP port (8554) is already in use (e.g., by VILA JPS VST), configure mediamtx on another port like `8555` and update `MEDIAMTX_INTERNAL`/`MEDIAMTX_EXTERNAL` on all robot services to match.
 
 ### Adding a Robot (Prod)
 
@@ -302,7 +284,6 @@ docker build -t visual-patrol .
 | `network_mode` | (default bridge) | `host` |
 | nginx port | `ports: 5000:5000` | Listens on host:5000 |
 | Flask ports | All internal 5000 | Unique per robot (5001, 5002...) |
-| mediamtx port | `ports: 8554:8554` | Configured via `MTX_RTSPADDRESS` |
 | Service discovery | Docker DNS | Explicit `127.0.0.1:PORT` |
 | `MEDIAMTX_INTERNAL` | `mediamtx:8554` (Docker DNS) | `localhost:8555` |
 | `MEDIAMTX_EXTERNAL` | `localhost:8554` (host port) | `localhost:8555` |
