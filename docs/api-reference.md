@@ -157,6 +157,8 @@ Capture an image from the front camera and run AI analysis.
 
 ## Test Live Monitor (robot-specific)
 
+Uses the legacy VILA chat completions API for quick testing from the settings page.
+
 ### POST `/api/{id}/test_live_monitor/start`
 
 Start a test live monitor session. Captures camera frames and sends them to the VILA chat completions API.
@@ -166,12 +168,11 @@ Start a test live monitor session. Captures camera frames and sends them to the 
 {
   "vila_alert_url": "http://192.168.50.35:9000",
   "rules": ["Is there a person?", "Is there fire?"],
-  "interval": 5,
-  "system_prompt": "Answer only yes or no."
+  "interval": 5
 }
 ```
 
-All fields are optional — falls back to saved settings if omitted.
+All fields are optional -- falls back to saved settings if omitted.
 
 **Response:**
 ```json
@@ -204,15 +205,13 @@ Returns the current test session state and results.
       "check_id": 1,
       "timestamp": "2026-02-06 23:05:58",
       "responses": [
-        { "rule": "Is there a person?", "answer": "0" },
-        { "rule": "Is there fire?", "answer": "0" }
+        { "rule": "Is there a person?", "answer": "no" },
+        { "rule": "Is there fire?", "answer": "no" }
       ]
     }
   ]
 }
 ```
-
-**VILA response format:** VILA 3B responds with `0` (no) or `1` (yes) instead of text. The frontend normalizes these to `YES`/`NO` for display. The backend `LiveMonitor` treats `"yes"`, `"true"`, and `"1"` as triggered alerts.
 
 ---
 
@@ -261,9 +260,10 @@ Returns live monitor alerts for the currently active patrol run. Returns empty l
   {
     "id": 1,
     "rule": "Is there a person lying on the floor?",
-    "response": "yes",
+    "response": "triggered",
     "image_path": "report/live_alerts/42_1707200000_Is_there_a_person_lying_on_the_floor_.jpg",
-    "timestamp": "2026-02-06 14:05:00"
+    "timestamp": "2026-02-06 14:05:00",
+    "stream_source": "robot_camera"
   }
 ]
 ```
@@ -439,6 +439,84 @@ Fetch saved locations from the Kachaka robot and merge with existing points. Ski
 
 ---
 
+## Infrastructure (global)
+
+### GET `/api/relay/status`
+
+Returns the status of all active RTSP relay processes.
+
+**Response:**
+```json
+{
+  "robot-a/camera": {
+    "type": "robot_camera",
+    "running": true,
+    "uptime": 125.3,
+    "restart_count": 0
+  },
+  "robot-a/external": {
+    "type": "external_rtsp",
+    "running": true,
+    "uptime": 124.8,
+    "restart_count": 0
+  }
+}
+```
+
+Returns `{}` when no relays are active (no patrol running with relay sources enabled).
+
+### POST `/api/relay/test`
+
+Quick-test the robot camera relay. Starts a relay, waits 3 seconds, checks status, then stops.
+
+**Response (success):**
+```json
+{
+  "status": "ok",
+  "relay_status": {
+    "robot-a/camera": {
+      "type": "robot_camera",
+      "running": true,
+      "uptime": 3.1,
+      "restart_count": 0
+    }
+  }
+}
+```
+
+**Response (failure):**
+```json
+{
+  "status": "error",
+  "error": "Camera not available"
+}
+```
+
+### GET `/api/vila/health`
+
+Check VILA JPS API health by calling `GET {vila_jps_url}/api/v1/health/ready`.
+
+**Response (healthy):**
+```json
+{
+  "status": "ok",
+  "vila_jps_url": "http://localhost:5010"
+}
+```
+
+**Response (unhealthy):**
+```json
+{
+  "status": "error",
+  "error": "Connection refused",
+  "vila_jps_url": "http://localhost:5010"
+}
+```
+
+**Errors:** `400` if `vila_jps_url` is not configured.
+
+---
+
 ## Global Endpoints
 
 ### GET/POST `/api/settings`
@@ -467,10 +545,13 @@ Fetch saved locations from the Kachaka robot and merge with existing points. Ski
   "vila_server_url": "http://192.168.50.35:9000",
   "vila_model": "VILA1.5-3B",
   "vila_alert_url": "http://192.168.50.35:9000",
-  "vila_system_prompt": "Answer only yes or no.",
   "enable_live_monitor": false,
   "live_monitor_interval": 5,
-  "live_monitor_rules": ["Is there a person?", "Is there fire?"]
+  "live_monitor_rules": ["Is there a person?", "Is there fire?"],
+  "vila_jps_url": "http://localhost:5010",
+  "enable_robot_camera_relay": false,
+  "enable_external_rtsp": false,
+  "external_rtsp_url": ""
 }
 ```
 
@@ -519,12 +600,12 @@ Returns all patrol runs, newest first.
 
 ### GET `/api/history/{run_id}`
 
-Returns detailed patrol run info with all inspection results.
+Returns detailed patrol run info with all inspection results and live alerts.
 
 **Response:**
 ```json
 {
-  "run": { "id": 42, "start_time": "...", "status": "Completed", ... },
+  "run": { "id": 42, "start_time": "...", "status": "Completed", "..." : "..." },
   "inspections": [
     {
       "id": 100,
@@ -546,10 +627,11 @@ Returns detailed patrol run info with all inspection results.
       "id": 1,
       "run_id": 42,
       "rule": "Is there a person lying on the floor?",
-      "response": "yes",
+      "response": "triggered",
       "image_path": "report/live_alerts/42_1707200000_Is_there_a_person_lying_on_the_floor_.jpg",
       "timestamp": "2026-02-06 14:05:00",
-      "robot_id": "robot-a"
+      "robot_id": "robot-a",
+      "stream_source": "robot_camera"
     }
   ]
 }

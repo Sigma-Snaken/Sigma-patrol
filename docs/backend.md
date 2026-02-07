@@ -2,7 +2,7 @@
 
 ## Overview
 
-The backend is a Python Flask application that provides the REST API, manages robot communication via gRPC, orchestrates patrol missions, runs AI inference, and generates PDF reports.
+The backend is a Python Flask application that provides the REST API, manages robot communication via gRPC, orchestrates patrol missions, runs AI inference, manages RTSP camera relays, performs live monitoring via VILA JPS, and generates PDF reports.
 
 ## File Structure
 
@@ -15,8 +15,9 @@ src/backend/
 ├── robot_service.py     # Kachaka robot gRPC interface
 ├── patrol_service.py    # Patrol orchestration, scheduling
 ├── ai_service.py        # Google Gemini AI integration
+├── live_monitor.py      # VILA JPS live monitoring (WebSocket alerts) + legacy test monitor
+├── relay_manager.py     # ffmpeg RTSP relay process management
 ├── pdf_service.py       # PDF report generation (ReportLab)
-├── live_monitor.py      # Background camera monitoring via VILA Alert API
 ├── video_recorder.py    # Video recording during patrols (OpenCV)
 ├── utils.py             # JSON I/O, timezone helpers
 ├── logger.py            # Timezone-aware logging setup
@@ -28,7 +29,7 @@ src/backend/
 Services are instantiated as module-level singletons. Import order matters because services read settings from the database at module load time.
 
 ```
-config.py           -- Loaded first (env vars, paths)
+config.py           -- Loaded first (env vars, paths, mediamtx config)
     |
 database.py         -- Schema init (init_db called before service imports)
     |
@@ -36,12 +37,13 @@ settings_service.py -- Reads global_settings table
     |
 robot_service.py    -- Connects to Kachaka (reads ROBOT_IP from env)
 ai_service.py       -- Configures Gemini client (reads API key from settings)
-patrol_service.py   -- Imports robot_service, ai_service, settings_service
-live_monitor.py     -- Used by patrol_service (lazy import)
+relay_manager.py    -- Manages ffmpeg subprocesses (singleton, starts monitor thread)
+patrol_service.py   -- Imports robot_service, ai_service, relay_manager, live_monitor
+live_monitor.py     -- Used by patrol_service (VILA JPS API + WebSocket)
 pdf_service.py      -- Reads from database for report data
 video_recorder.py   -- Used by patrol_service
 utils.py            -- Used by patrol_service, app.py
-logger.py           -- Used by ai_service, patrol_service, video_recorder
+logger.py           -- Used by ai_service, patrol_service, video_recorder, relay_manager, live_monitor
 ```
 
 ## Modules
@@ -61,6 +63,8 @@ Reads environment variables and defines filesystem paths.
 | `LOG_DIR` | `{project}/logs` | Log file directory |
 | `PORT` | `5000` | Flask listen port |
 | `TZ` | (system) | System timezone (Docker) |
+| `MEDIAMTX_INTERNAL` | `"localhost:8554"` | mediamtx address for ffmpeg to push to (inside container) |
+| `MEDIAMTX_EXTERNAL` | `"localhost:8554"` | mediamtx address for VILA JPS to pull from (outside container) |
 
 **Derived Paths:**
 
@@ -171,11 +175,12 @@ with db_context() as (conn, cursor):
 |--------|------|-------------|
 | `id` | INTEGER PK | Auto-increment |
 | `run_id` | INTEGER FK | References `patrol_runs.id` |
-| `rule` | TEXT | Alert rule question that triggered |
-| `response` | TEXT | VILA Alert API response |
+| `rule` | TEXT | Alert rule that triggered |
+| `response` | TEXT | `"triggered"` (JPS) or VILA chat response (legacy) |
 | `image_path` | TEXT | Relative path to evidence image |
 | `timestamp` | TEXT | Alert timestamp |
 | `robot_id` | TEXT | Robot identifier |
+| `stream_source` | TEXT | Stream type: `"robot_camera"`, `"external_rtsp"`, or `"unknown"` |
 
 **`global_settings`** -- Key-value settings store
 
@@ -216,7 +221,7 @@ Manages the gRPC connection to a Kachaka robot.
 | `rotate(angle)` | Rotate in place |
 | `return_home()` | Return to charging station |
 | `cancel_command()` | Cancel current command |
-| `get_front_camera_image()` | Get front camera JPEG |
+| `get_front_camera_image()` | Get front camera JPEG (also used as relay frame_func) |
 | `get_back_camera_image()` | Get back camera JPEG |
 | `get_serial()` | Get robot serial number |
 | `get_locations()` | Get saved locations from robot |
@@ -254,6 +259,30 @@ class InspectionResult(BaseModel):
 
 **`parse_ai_response()`** is a standalone utility function that normalizes AI responses into a standard dict format used by patrol_service.
 
+### `relay_manager.py`
+
+Manages ffmpeg subprocesses pushing camera streams to mediamtx RTSP server.
+
+**Singleton:** `relay_manager = RelayManager()`
+
+**Key methods:**
+
+| Method | Description |
+|--------|-------------|
+| `start_robot_camera_relay(robot_id, frame_func, mediamtx_internal)` | Start gRPC JPEG → ffmpeg → RTSP relay |
+| `start_external_rtsp_relay(robot_id, source_url, mediamtx_internal)` | Start RTSP → RTSP copy relay |
+| `stop_relay(key)` | Stop a specific relay by key |
+| `stop_all()` | Stop all active relays |
+| `get_status()` | Return `{key: {type, running, uptime, restart_count}}` |
+
+**Robot camera relay:** Spawns ffmpeg with `image2pipe` input, `libx264 ultrafast` encoding, and RTSP TCP output. A feeder daemon thread calls `frame_func()` every 200ms (5 fps) and writes JPEG bytes to ffmpeg's stdin.
+
+**External RTSP relay:** Spawns ffmpeg with RTSP TCP input, `copy` video codec, no audio (`-an`), and RTSP TCP output.
+
+**Auto-restart:** A background monitor thread checks every 10 seconds. Dead ffmpeg processes are restarted with exponential backoff (up to 3 retries).
+
+**Cleanup:** `atexit.register(stop_all)` ensures ffmpeg processes are terminated on shutdown. `stop_relay()` uses SIGTERM → 5s wait → SIGKILL.
+
 ### `patrol_service.py`
 
 Orchestrates autonomous patrol missions.
@@ -266,22 +295,23 @@ Orchestrates autonomous patrol missions.
 2. Validate AI is configured
 3. Create `patrol_runs` DB record
 4. Optionally start video recording
-5. Optionally start live monitor (if `enable_live_monitor` is enabled and `vila_alert_url` is set)
-6. For each waypoint:
+5. Start RTSP relays (if `enable_robot_camera_relay` or `enable_external_rtsp` is enabled)
+6. Wait 3s for streams to establish
+7. Start live monitor (if streams, rules, and `vila_jps_url` are configured)
+8. For each waypoint:
    a. Move robot to point (`_move_to_point`)
    b. Wait 2 seconds for stability
-   c. Pause live monitor
-   d. Capture front camera image
-   e. Run AI inspection (sync or async via turbo mode)
-   f. Save result to `inspection_results` table
-   g. Resume live monitor
-7. Stop live monitor
-8. Return home
-9. Wait for async queue (turbo mode)
-10. Optionally analyze video
-11. Generate AI summary report (includes live monitor alerts if any)
-12. Generate AI-summarized Telegram message and send notification (if enabled)
-13. Update run status and tokens
+   c. Capture front camera image
+   d. Run AI inspection (sync or async via turbo mode)
+   e. Save result to `inspection_results` table
+9. Stop live monitor
+10. Stop RTSP relays
+11. Return home
+12. Wait for async queue (turbo mode)
+13. Optionally analyze video
+14. Generate AI summary report (includes live monitor alerts if any)
+15. Generate AI-summarized Telegram message and send notification (if enabled)
+16. Update run status and tokens
 
 **Turbo mode:** When enabled, images are queued for AI analysis while the robot continues moving to the next waypoint. The `_inspection_worker` thread processes the queue in the background.
 
@@ -291,71 +321,67 @@ Orchestrates autonomous patrol missions.
 
 ### `live_monitor.py`
 
-Background camera monitoring via VILA during patrol, plus a test monitor for the settings page.
+Background camera monitoring via VILA JPS during patrol, plus a legacy test monitor for the settings page.
 
 **Singletons:** `live_monitor = LiveMonitor()`, `test_live_monitor = TestLiveMonitor()`
 
-#### VILA API Integration
+#### VILA JPS API Integration (LiveMonitor)
 
-Uses the VILA OpenAI-compatible chat completions endpoint (`POST /v1/chat/completions`). Each alert rule is sent as a separate request with the camera frame as a base64 image.
+The primary `LiveMonitor` class uses the VILA JPS Stream API + Alert API + WebSocket for efficient continuous monitoring. VILA handles continuous frame capture and rule evaluation internally -- the backend only receives WebSocket events when alerts trigger.
 
-**Helper function:** `_call_vila_chat(vila_url, data_url, rules, system_prompt="", timeout=30)`
+**Lifecycle:**
 
-- Sends one request per rule for reliable yes/no answers from small VLMs
-- The `system_prompt` is appended to each rule question (e.g., `"Is there a person? Answer only yes or no."`)
-- Returns a list of answer strings, one per rule
-
-**VILA response format:**
-
-VILA 3B (quantized) responds with `0`/`1` instead of `yes`/`no`:
-
-| Response | Meaning | Triggered? |
-|----------|---------|------------|
-| `0` | No | No |
-| `1` | Yes | Yes |
-| `no` | No | No |
-| `yes` | Yes | Yes |
-
-The backend treats `"yes"`, `"true"`, and `"1"` as triggered alerts. No system prompt is used in the `messages` array — VILA 3B produces better results with direct questions only.
-
-#### `LiveMonitor`
-
-Runs as a daemon thread alongside patrol.
+1. **Register streams**: `POST {vila_jps_url}/api/v1/live-stream` with `{url, name}` → returns `stream_id`
+2. **Set alert rules**: `POST {vila_jps_url}/api/v1/alerts` with `{alerts, id}` per stream
+3. **WebSocket listener**: Connects to `ws://{host}:5016/api/v1/alerts/ws`, listens for alert events
+4. **On alert event**: Cooldown check → capture evidence frame → save to DB + disk → send Telegram
+5. **Stop**: Close WebSocket → `DELETE {vila_jps_url}/api/v1/live-stream/{id}` per stream
 
 **Key methods:**
 
 | Method | Description |
 |--------|-------------|
-| `start(run_id, rules, url, frame_func, interval, system_prompt)` | Start background monitoring |
-| `stop()` | Stop monitoring and join thread |
-| `pause()` | Pause monitoring (during inspection points) |
-| `resume()` | Resume monitoring (after inspection) |
-| `get_alerts()` | Return list of alerts collected during this run |
+| `start(run_id, config)` | Start monitoring with VILA JPS config dict |
+| `stop()` | Stop monitoring, deregister streams |
+| `get_alerts()` | Return collected alerts list |
 
-**Lifecycle during patrol:**
+**Config dict:**
+```python
+{
+    "vila_jps_url": "http://localhost:5010",
+    "streams": [
+        {"rtsp_url": "rtsp://...", "name": "Robot Camera",
+         "type": "robot_camera", "evidence_func": callable},
+        {"rtsp_url": "rtsp://...", "name": "External Camera",
+         "type": "external_rtsp"},
+    ],
+    "rules": ["Is there a person?", "Is there fire?"],
+    "telegram_config": {"bot_token": "...", "user_id": "..."},
+    "mediamtx_external": "localhost:8555",
+}
+```
 
-1. Started after patrol run record is created (if `enable_live_monitor` is enabled and `vila_alert_url` is set)
-2. Paused before each waypoint inspection (`pause()`)
-3. Resumed after each waypoint inspection (`resume()`)
-4. Stopped in the `finally` block after the patrol loop ends
-5. Collected alerts are included in the AI summary report
+**Evidence capture:** Robot camera alerts use `evidence_func()` (gRPC) for best quality. External RTSP alerts use `cv2.VideoCapture()` to grab a frame from the relay URL.
 
-**Alert processing:**
+**WebSocket reconnection:** On disconnect, retries with 5s delay, up to 10 reconnection attempts. Reconnect counter resets on successful connection.
 
-- Each check captures a camera frame, base64-encodes it, and calls `POST {vila_alert_url}/v1/chat/completions` once per rule
-- Per-rule cooldown of 60 seconds prevents repeated alerts for the same rule
-- Evidence images are saved to `data/{robot_id}/report/live_alerts/`
-- Alerts are stored in the `live_alerts` database table
+**Constraints:** Maximum 10 alert rules per stream (VILA JPS limit). Per-rule cooldown of 60 seconds prevents duplicate alerts (defense-in-depth alongside VILA's own cooldown).
 
-#### `TestLiveMonitor`
+#### Legacy Chat Completions (TestLiveMonitor)
 
-Lightweight test monitor for the settings page — no DB writes, keeps up to 50 results in memory.
+The `TestLiveMonitor` provides a quick settings-page test using the VILA OpenAI-compatible chat completions endpoint (`POST /v1/chat/completions`). Each alert rule is sent as a separate request with the camera frame as a base64 image.
+
+**Helper function:** `_call_vila_chat(vila_url, data_url, rules, timeout=30, max_retries=1)`
+
+- Uses NVIDIA-recommended settings: `max_tokens=1`, `min_tokens=1`, system prompt
+- Retries on non-boolean responses (up to `max_retries`)
+- Returns list of answer strings, one per rule
 
 **Key methods:**
 
 | Method | Description |
 |--------|-------------|
-| `start(url, rules, frame_func, interval, system_prompt)` | Start test session |
+| `start(url, rules, frame_func, interval)` | Start test session |
 | `stop()` | Stop test session |
 | `get_status()` | Return `{active, check_count, error, results}` |
 
@@ -415,8 +441,9 @@ Logging configuration with timezone support.
 | `pillow` | >=10.0, <11.0 | Image processing |
 | `google-genai` | >=1.0, <2.0 | Google Gemini AI SDK |
 | `reportlab` | >=4.0, <5.0 | PDF generation |
-| `opencv-python-headless` | >=4.9, <5.0 | Video recording |
-| `requests` | >=2.31, <3.0 | Telegram API calls |
+| `opencv-python-headless` | >=4.9, <5.0 | Video recording, RTSP evidence capture |
+| `requests` | >=2.31, <3.0 | HTTP API calls (Telegram, VILA JPS) |
+| `websocket-client` | >=1.6, <2.0 | VILA JPS WebSocket connection |
 
 ## Startup Sequence (`app.py`)
 

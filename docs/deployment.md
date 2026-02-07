@@ -14,6 +14,7 @@ Visual Patrol supports two deployment modes:
 - Docker Engine 24+ and Docker Compose v2
 - Network access to the Kachaka robot(s)
 - (Production) Network access to `ghcr.io` for pulling images
+- (Live monitor) VILA JPS server accessible from the deployment machine
 
 ## Development Setup
 
@@ -34,10 +35,12 @@ Open [http://localhost:5000](http://localhost:5000).
 ### How It Works
 
 - nginx binds port `5000` on the host
+- mediamtx binds port `8554` on the host (RTSP relay server)
 - Each robot service runs Flask on port `5000` internally (Docker bridge networking isolates them)
 - nginx resolves service names via Docker's internal DNS (`resolver 127.0.0.11`)
 - Docker service names **must** match `ROBOT_ID` values (e.g., service `robot-a` = env `ROBOT_ID=robot-a`)
 - All services mount `./src` for live code reloading and `./data` + `./logs` for persistent storage
+- `MEDIAMTX_INTERNAL=mediamtx:8554` (ffmpeg uses Docker DNS), `MEDIAMTX_EXTERNAL=localhost:8554` (VILA on host)
 
 ### Adding a Robot (Dev)
 
@@ -58,6 +61,10 @@ Open [http://localhost:5000](http://localhost:5000).
       - ROBOT_ID=robot-d
       - ROBOT_NAME=Robot D
       - ROBOT_IP=192.168.50.135:26400
+      - MEDIAMTX_INTERNAL=mediamtx:8554
+      - MEDIAMTX_EXTERNAL=localhost:8554
+    depends_on:
+      - mediamtx
     restart: unless-stopped
 ```
 
@@ -89,6 +96,11 @@ python src/backend/app.py
 
 Flask serves both the API and frontend at `http://localhost:5000`. No nginx needed for single-robot local dev.
 
+For RTSP relay functionality, run mediamtx separately:
+```bash
+docker run -d --name mediamtx -p 8554:8554 bluenviron/mediamtx:latest
+```
+
 ## Production Setup (Jetson / Linux)
 
 ### Fresh Install
@@ -117,8 +129,32 @@ The `data/` and `logs/` directories are created automatically on first start.
 - All containers use `network_mode: host` (required for Jetson with `iptables: false`)
 - nginx listens on port 5000 on the host
 - Each Flask backend listens on a unique port via `PORT` env var (5001, 5002, ...)
+- mediamtx RTSP port is configurable via `MTX_RTSPADDRESS` (default `:8554`)
 - nginx routes by matching robot IDs in the URL to specific ports
 - Images are pulled from `ghcr.io/sigma-snaken/visual-patrol:latest`
+- All services use `MEDIAMTX_INTERNAL` and `MEDIAMTX_EXTERNAL` pointing to `localhost:{port}`
+
+### mediamtx Configuration
+
+The mediamtx service provides RTSP relay for live monitoring. Default configuration:
+
+```yaml
+mediamtx:
+  image: bluenviron/mediamtx:latest
+  container_name: visual_patrol_mediamtx
+  network_mode: host
+  environment:
+    - MTX_RTSPADDRESS=:8555
+    - MTX_HLS=no
+    - MTX_WEBRTC=no
+    - MTX_RTMP=no
+    - MTX_SRT=no
+  restart: unless-stopped
+```
+
+**Port conflicts:** If the default RTSP port (8554) is already in use (e.g., by VILA JPS VST), change `MTX_RTSPADDRESS` to another port like `:8555` and update `MEDIAMTX_INTERNAL`/`MEDIAMTX_EXTERNAL` on all robot services to match.
+
+**Disabled protocols:** HLS, WebRTC, RTMP, and SRT are disabled (`no`) to prevent port conflicts with other services. Only RTSP is needed for the relay functionality.
 
 ### Adding a Robot (Prod)
 
@@ -140,6 +176,8 @@ The `data/` and `logs/` directories are created automatically on first start.
       - ROBOT_ID=robot-b
       - ROBOT_NAME=Robot B
       - ROBOT_IP=192.168.50.134:26400
+      - MEDIAMTX_INTERNAL=localhost:8555
+      - MEDIAMTX_EXTERNAL=localhost:8555
     restart: unless-stopped
 ```
 
@@ -194,6 +232,12 @@ docker compose -f docker-compose.prod.yaml restart robot-a
 
 # Check service status
 docker compose -f docker-compose.prod.yaml ps
+
+# Check relay status
+curl http://localhost:5000/api/relay/status
+
+# Check VILA JPS health
+curl http://localhost:5000/api/vila/health
 ```
 
 ## Docker Image
@@ -238,6 +282,7 @@ docker build -t visual-patrol .
 │   │   │   └── patrol_schedule.json
 │   │   └── report/
 │   │       ├── images/        # Inspection photos
+│   │       ├── live_alerts/   # Live monitor evidence images
 │   │       └── video/         # Patrol videos (if enabled)
 │   └── robot-b/
 │       └── ...
@@ -245,7 +290,9 @@ docker build -t visual-patrol .
     ├── robot-a_app.log
     ├── robot-a_ai_service.log
     ├── robot-a_patrol_service.log
-    └── robot-a_video_recorder.log
+    ├── robot-a_video_recorder.log
+    ├── robot-a_live_monitor.log
+    └── robot-a_relay_manager.log
 ```
 
 ## Networking Comparison
@@ -255,7 +302,10 @@ docker build -t visual-patrol .
 | `network_mode` | (default bridge) | `host` |
 | nginx port | `ports: 5000:5000` | Listens on host:5000 |
 | Flask ports | All internal 5000 | Unique per robot (5001, 5002...) |
+| mediamtx port | `ports: 8554:8554` | Configured via `MTX_RTSPADDRESS` |
 | Service discovery | Docker DNS | Explicit `127.0.0.1:PORT` |
+| `MEDIAMTX_INTERNAL` | `mediamtx:8554` (Docker DNS) | `localhost:8555` |
+| `MEDIAMTX_EXTERNAL` | `localhost:8554` (host port) | `localhost:8555` |
 | Adding a robot | Add service only | Add service + nginx `if` block |
 | Frontend serving | nginx serves `/app/frontend` | Flask serves (proxied through nginx) |
 | Why | Docker Desktop + WSL2 breaks `network_mode: host` | Jetson `iptables: false` breaks bridge |
@@ -284,5 +334,8 @@ healthcheck:
 | Camera stream not loading | Enable "Continuous Camera Stream" in Settings; verify robot connection |
 | Map not loading | Robot may still be connecting; check container logs for gRPC errors |
 | Port conflict (prod) | Ensure each robot has a unique `PORT` value |
+| mediamtx port conflict | Change `MTX_RTSPADDRESS` and update `MEDIAMTX_*` env vars to match |
+| Live monitor not working | Check `logs/{robot-id}_live_monitor.log`; verify VILA JPS is running (`/api/vila/health`) |
+| ffmpeg relay crashing | Check `logs/{robot-id}_relay_manager.log`; verify mediamtx is running |
 | Permission denied on data/logs | The entrypoint script runs `chown` automatically; check if `gosu` is installed |
 | Stale robot entries in DB | Can happen if `ROBOT_ID` env var is missing (defaults to `"default"`) |

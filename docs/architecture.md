@@ -2,7 +2,7 @@
 
 ## Overview
 
-Visual Patrol is a multi-robot autonomous inspection system. A web-based single-page application (SPA) connects through an nginx reverse proxy to per-robot Flask backend instances, all sharing a common SQLite database.
+Visual Patrol is a multi-robot autonomous inspection system. A web-based single-page application (SPA) connects through an nginx reverse proxy to per-robot Flask backend instances, all sharing a common SQLite database. An RTSP relay layer (mediamtx + ffmpeg) enables continuous camera streaming to the VILA JPS Alert API for real-time monitoring.
 
 ```
                            Browser (SPA)
@@ -17,6 +17,13 @@ Visual Patrol is a multi-robot autonomous inspection system. A web-based single-
                   \           |         /
                    Shared SQLite DB (WAL)
                      data/report/report.db
+
+              mediamtx (RTSP relay, port 8554/8555)
+              /{robot-id}/camera   ← ffmpeg (gRPC JPEG)
+              /{robot-id}/external ← ffmpeg (RTSP copy)
+                        |
+                   VILA JPS (external)
+                   Streams → Alert Rules → WebSocket events
 ```
 
 ## Component Breakdown
@@ -42,10 +49,31 @@ Each robot runs its own Flask process. The backend handles:
 - gRPC communication with Kachaka robots via `kachaka-api`
 - AI inference through Google Gemini API
 - Patrol orchestration (movement, image capture, AI analysis)
+- RTSP relay management (ffmpeg subprocesses pushing to mediamtx)
+- Live monitoring via VILA JPS API (stream registration, alert rules, WebSocket)
 - PDF report generation
-- Telegram notifications
+- Telegram notifications (patrol reports + live alert photos)
 - Video recording during patrols
-- Live camera monitoring via VILA Alert API during patrols
+
+### RTSP Relay (mediamtx + ffmpeg)
+
+- **mediamtx**: Lightweight RTSP server (`bluenviron/mediamtx` Docker image)
+- **ffmpeg**: Managed by `relay_manager.py` as subprocesses
+
+Two relay types:
+1. **Robot camera relay**: gRPC JPEG frames → ffmpeg `image2pipe` → H.264 → RTSP push to `/{robot-id}/camera`
+2. **External RTSP relay**: Source RTSP → ffmpeg `copy` codec → RTSP push to `/{robot-id}/external`
+
+VILA JPS pulls these RTSP streams from mediamtx for continuous analysis.
+
+### VILA JPS Integration
+
+- **Stream API**: `POST /api/v1/live-stream` registers RTSP streams with VILA
+- **Alert API**: `POST /api/v1/alerts` sets yes/no alert rules per stream
+- **WebSocket**: `ws://{host}:5016/api/v1/alerts/ws` delivers real-time alert events
+- **Deregister**: `DELETE /api/v1/live-stream/{id}` cleans up on patrol stop
+
+When an alert fires, the backend captures an evidence frame (gRPC for robot camera, cv2 for external RTSP), saves it to disk and DB, and sends it to Telegram if configured.
 
 ### Reverse Proxy (nginx)
 
@@ -90,6 +118,38 @@ Flask:    Reads from shared SQLite DB, returns settings
 
 Any backend can serve global requests because they all share the same database.
 
+## Live Monitor Data Flow
+
+```
+1. Patrol starts
+   ├── relay_manager starts ffmpeg subprocesses
+   │   ├── Robot camera: gRPC frames → ffmpeg pipe → mediamtx RTSP
+   │   └── External RTSP: source → ffmpeg copy → mediamtx RTSP
+   └── Wait 3s for streams to establish
+
+2. LiveMonitor.start()
+   ├── POST /api/v1/live-stream → register each stream → get stream_id
+   ├── POST /api/v1/alerts → set alert rules per stream
+   └── Start WebSocket listener thread
+
+3. During patrol
+   ├── VILA JPS pulls RTSP streams, evaluates rules continuously
+   ├── On alert → WebSocket event delivered to backend
+   │   ├── Cooldown check (60s per rule+stream)
+   │   ├── Capture evidence frame (gRPC or cv2)
+   │   ├── Save JPEG to data/{robot_id}/report/live_alerts/
+   │   ├── INSERT INTO live_alerts
+   │   └── Send Telegram photo if configured
+   └── Alerts visible in patrol dashboard via /api/{id}/patrol/live_alerts
+
+4. Patrol ends
+   ├── LiveMonitor.stop()
+   │   ├── Close WebSocket
+   │   └── DELETE /api/v1/live-stream/{id} for each stream
+   ├── relay_manager.stop_all() → SIGTERM ffmpeg processes
+   └── Alerts included in AI summary report
+```
+
 ## Data Model
 
 ### Per-Robot Data (filesystem)
@@ -127,7 +187,9 @@ Each Flask backend runs several background threads:
 | `_schedule_checker` (patrol_service) | Checks for scheduled patrol times | 30s |
 | `_inspection_worker` (patrol_service) | Processes AI inspection queue | Event-driven |
 | `_record_loop` (video_recorder) | Captures video frames during patrol | 1/fps |
-| `_monitor_loop` (live_monitor) | Sends frames to VILA Alert API during patrol | Configurable (default 5s) |
+| `_feeder_loop` (relay_manager) | Feeds gRPC JPEG frames to ffmpeg stdin | 200ms (5 fps) |
+| `_monitor_loop` (relay_manager) | Checks relay health, restarts dead ffmpeg | 10s |
+| `_ws_listener` (live_monitor) | Listens for VILA JPS WebSocket alert events | Continuous |
 
 ## Networking Modes
 
@@ -136,9 +198,12 @@ Each Flask backend runs several background threads:
 Uses Docker bridge networking:
 
 - nginx binds `ports: 5000:5000`
+- mediamtx binds `ports: 8554:8554`
 - All Flask backends listen on port 5000 internally
 - nginx resolves backend hostnames via Docker DNS (`resolver 127.0.0.11`)
 - Docker service names must match `ROBOT_ID` values (e.g., service `robot-a` = `ROBOT_ID=robot-a`)
+- `MEDIAMTX_INTERNAL=mediamtx:8554` (ffmpeg inside container pushes via Docker DNS)
+- `MEDIAMTX_EXTERNAL=localhost:8554` (VILA JPS on host pulls from localhost)
 
 ### Production (Jetson / Linux host)
 
@@ -147,7 +212,9 @@ Uses host networking (`network_mode: host`):
 - All containers share the host network stack
 - nginx listens on port 5000
 - Each Flask backend uses a unique port via `PORT` env var (5001, 5002, ...)
+- mediamtx RTSP port configurable via `MTX_RTSPADDRESS` (default 8554, use 8555 if port conflicts)
 - nginx routes by robot ID using explicit proxy rules to `127.0.0.1:PORT`
+- `MEDIAMTX_INTERNAL=localhost:8555` and `MEDIAMTX_EXTERNAL=localhost:8555` (all on host network)
 
 See [deployment.md](deployment.md) for details.
 

@@ -24,7 +24,7 @@ src/frontend/
         ├── patrol.js            # Patrol start/stop, status polling
         ├── schedule.js          # Scheduled patrol management
         ├── history.js           # Patrol history, detail modal, reports
-        ├── settings.js          # Settings load/save, clock
+        ├── settings.js          # Settings load/save, clock, live monitor test
         ├── stats.js             # Token usage chart (Chart.js)
         ├── chart.min.js         # Chart.js (vendored, downloaded at build)
         └── marked.min.js        # Marked.js (vendored, downloaded at build)
@@ -201,7 +201,7 @@ Renders three separate table views:
 - Displays latest AI analysis result
 - Shows scrollable history of current patrol results
 - Manages camera stream (active during patrol, optionally during idle)
-- **Live Alerts panel**: When live monitoring is active, polls `GET /api/{id}/patrol/live_alerts` each second and renders triggered alerts in a red-themed collapsible panel with a badge counter
+- **Live Alerts panel**: When live monitoring is active, polls `GET /api/{id}/patrol/live_alerts` each second and renders triggered alerts in a red-themed collapsible panel with a badge counter. Alerts show rule, stream source, timestamp, and evidence image.
 
 ### `schedule.js` -- Scheduled Patrols
 
@@ -215,6 +215,7 @@ Renders three separate table views:
 - Lists all past patrol runs with status, timing, and token usage
 - Robot filter dropdown
 - Click to view detail modal with AI summary and inspection images
+- Live alerts section in detail modal (with stream source labels)
 - Generate multi-day analysis reports with date range picker
 - Download patrol PDFs and analysis report PDFs
 - Uses `marked.js` to render Markdown report content
@@ -225,7 +226,14 @@ Renders three separate table views:
 - Displays registered robots list
 - Manages the header clock (uses configured timezone)
 - Settings include: API key, model, timezone, prompts, feature toggles, Telegram config
-- **Live Monitor settings**: Shown only when VLM provider is VILA and alert URL is set. Includes enable checkbox, check interval (2-30s), and alert rules textarea (one rule per line)
+- **Live Monitor (VILA JPS) settings**:
+  - Stream source checkboxes: Robot Camera Relay, External RTSP
+  - External RTSP URL input field
+  - VILA JPS URL input field
+  - Alert rules textarea (max 10, one per line)
+  - Enable live monitoring checkbox
+- **Legacy / Test settings** (collapsible): VILA Server URL, VILA Model, VILA Alert URL, check interval
+- **Test Live Monitor button**: Runs a quick test using legacy chat completions approach (validates rules and VILA connection without starting a full patrol)
 
 ### `stats.js` -- Token Usage Statistics
 

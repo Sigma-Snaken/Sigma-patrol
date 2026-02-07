@@ -11,6 +11,12 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: visual_patrol_mediamtx
     network_mode: host
+    environment:
+      - MTX_RTSPADDRESS=:8555
+      - MTX_HLS=no
+      - MTX_WEBRTC=no
+      - MTX_RTMP=no
+      - MTX_SRT=no
     restart: unless-stopped
 
   robot-a:
@@ -28,8 +34,8 @@ services:
       - ROBOT_ID=robot-a
       - ROBOT_NAME=Robot A
       - ROBOT_IP=192.168.50.133:26400
-      - MEDIAMTX_INTERNAL=localhost:8554
-      - MEDIAMTX_EXTERNAL=localhost:8554
+      - MEDIAMTX_INTERNAL=localhost:8555
+      - MEDIAMTX_EXTERNAL=localhost:8555
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/state')"]
@@ -37,3 +43,22 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # robot-b:
+  #   container_name: visual_patrol_robot_b
+  #   image: ghcr.io/sigma-snaken/visual-patrol:latest
+  #   network_mode: host
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - DATA_DIR=/app/data
+  #     - LOG_DIR=/app/logs
+  #     - TZ=Asia/Taipei
+  #     - PORT=5002
+  #     - ROBOT_ID=robot-b
+  #     - ROBOT_NAME=Robot B
+  #     - ROBOT_IP=192.168.50.134:26400
+  #     - MEDIAMTX_INTERNAL=localhost:8555
+  #     - MEDIAMTX_EXTERNAL=localhost:8555
+  #   restart: unless-stopped

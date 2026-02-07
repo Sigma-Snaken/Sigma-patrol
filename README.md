@@ -13,42 +13,54 @@ Autonomous multi-robot patrol system integrating **Kachaka Robot** with **Google
 - **Multi-Robot Support** - Single dashboard controls multiple robots via dropdown selector
 - **Autonomous Patrol** - Define waypoints per robot and let them navigate automatically
 - **AI-Powered Inspection** - Gemini Vision analyzes camera images at each waypoint
+- **Live Monitoring (VILA JPS)** - Continuous camera monitoring via RTSP relay + VILA JPS Alert API with WebSocket-based alert events
 - **Video Recording** - Record patrol footage with codec auto-detection (H.264 / XVID / MJPEG)
+- **RTSP Camera Relay** - Robot camera (gRPC) and external RTSP cameras relayed through mediamtx
 - **Real-time Dashboard** - Live map, robot position, battery, camera streams
 - **Scheduled Patrols** - Recurring patrol times with day-of-week filtering
 - **Multi-day Analysis Reports** - AI-powered aggregated reports across date ranges
 - **PDF Reports** - Server-side PDF generation with Markdown and CJK support
-- **Telegram Notifications** - Send patrol reports and PDFs to Telegram on completion
+- **Telegram Notifications** - Send patrol reports, PDFs, and live alert photos to Telegram
 - **Manual Control** - Web-based remote control with D-pad navigation
 - **History & Analytics** - Browse past patrols with token usage statistics and robot filtering
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Browser (http://localhost:5000)                     │
-│  ├── Robot selector dropdown                         │
-│  ├── /api/{robot-id}/state  → robot-specific calls   │
-│  └── /api/settings          → global calls           │
-└──────────────────┬──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Browser (http://localhost:5000)                             │
+│  ├── Robot selector dropdown                                 │
+│  ├── /api/{robot-id}/state  → robot-specific calls           │
+│  └── /api/settings          → global calls                   │
+└──────────────────┬──────────────────────────────────────────┘
                    │
-┌──────────────────▼──────────────────────────────────┐
-│  nginx (port 5000)                                   │
-│  ├── /              → index.html (static)            │
-│  ├── /static/       → CSS / JS assets                │
-│  ├── /api/{robot-id}/...  → proxy to backend         │
-│  └── /api/...       → proxy to robot-a (global)      │
-├─────────────────────────────────────────────────────┤
-│  robot-a (Flask:5000)  ←→  Kachaka Robot A           │
-│  robot-b (Flask:5000)  ←→  Kachaka Robot B           │
-│  robot-c (Flask:5000)  ←→  Kachaka Robot C           │
-│  (all share ./data volume with SQLite WAL)           │
-└─────────────────────────────────────────────────────┘
+┌──────────────────▼──────────────────────────────────────────┐
+│  nginx (port 5000)                                           │
+│  ├── /              → index.html (static)                    │
+│  ├── /static/       → CSS / JS assets                        │
+│  ├── /api/{robot-id}/...  → proxy to backend                 │
+│  └── /api/...       → proxy to robot-a (global)              │
+├─────────────────────────────────────────────────────────────┤
+│  robot-a (Flask:5000)  ←→  Kachaka Robot A                   │
+│  robot-b (Flask:5000)  ←→  Kachaka Robot B                   │
+│  robot-c (Flask:5000)  ←→  Kachaka Robot C                   │
+│  (all share ./data volume with SQLite WAL)                   │
+├─────────────────────────────────────────────────────────────┤
+│  mediamtx (RTSP relay server, port 8554/8555)                │
+│  ├── /{robot-id}/camera   ← ffmpeg (gRPC JPEG → H.264)      │
+│  └── /{robot-id}/external ← ffmpeg (RTSP copy)              │
+│                                                              │
+│  VILA JPS (external)                                         │
+│  ├── POST /api/v1/live-stream  (register RTSP streams)       │
+│  ├── POST /api/v1/alerts       (set alert rules)             │
+│  └── WS :5016/api/v1/alerts/ws (receive alert events)        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 - nginx regex `^/api/(robot-[^/]+)/(.*)$` strips the robot ID and proxies to the matching Docker service
 - Docker service names **must** match robot IDs (`robot-a`, `robot-b`, etc.)
 - Global endpoints (`/api/settings`, `/api/robots`, `/api/history`, `/api/stats`) proxy to any backend (shared DB)
+- mediamtx receives RTSP streams from ffmpeg relays; VILA JPS pulls from mediamtx for continuous analysis
 - Adding a robot = add a service to `docker-compose.yml` + restart
 
 ## Quick Start
@@ -61,6 +73,7 @@ Open [http://localhost:5000](http://localhost:5000), go to **Settings** and conf
 
 1. **Google Gemini API Key**
 2. **Timezone**
+3. **Live Monitor** (optional): Enable stream sources, set VILA JPS URL, and define alert rules
 
 Robot IPs are set per-service in `docker-compose.yml` via the `ROBOT_IP` environment variable.
 
@@ -83,6 +96,10 @@ Add a new service to `docker-compose.yml`:
       - ROBOT_ID=robot-d
       - ROBOT_NAME=Robot D
       - ROBOT_IP=192.168.50.135:26400
+      - MEDIAMTX_INTERNAL=mediamtx:8554
+      - MEDIAMTX_EXTERNAL=localhost:8554
+    depends_on:
+      - mediamtx
     restart: unless-stopped
 ```
 
@@ -93,7 +110,7 @@ Add `robot-d` to the nginx `depends_on` list, then `docker compose up -d`.
 ```
 visual-patrol/
 ├── nginx.conf                  # Dev reverse proxy config
-├── docker-compose.yml          # Dev: nginx + per-robot services (bridge network)
+├── docker-compose.yml          # Dev: nginx + mediamtx + per-robot services (bridge network)
 ├── Dockerfile                  # Backend image (Python 3.10, non-root user)
 ├── .dockerignore
 ├── src/
@@ -102,6 +119,8 @@ visual-patrol/
 │   │   ├── robot_service.py    # Kachaka gRPC interface
 │   │   ├── patrol_service.py   # Patrol orchestration
 │   │   ├── ai_service.py       # Gemini AI integration
+│   │   ├── live_monitor.py     # VILA JPS live monitoring (WebSocket alerts)
+│   │   ├── relay_manager.py    # ffmpeg RTSP relay process management
 │   │   ├── settings_service.py # Global settings (DB-backed)
 │   │   ├── pdf_service.py      # PDF report generation
 │   │   ├── database.py         # SQLite management
@@ -131,8 +150,7 @@ visual-patrol/
 ├── logs/                       # Per-robot application logs
 ├── deploy/                     # Production config (host networking)
 │   ├── docker-compose.prod.yaml
-│   ├── nginx.conf
-│   └── README.md
+│   └── nginx.conf
 └── .github/workflows/          # CI/CD (multi-arch build → GHCR)
 ```
 
@@ -140,8 +158,8 @@ visual-patrol/
 
 ### URL Convention
 
-- **Robot-specific**: `/api/{robot-id}/endpoint` — nginx strips the robot ID prefix before proxying
-- **Global**: `/api/endpoint` — proxied to any backend (shared DB)
+- **Robot-specific**: `/api/{robot-id}/endpoint` -- nginx strips the robot ID prefix before proxying
+- **Global**: `/api/endpoint` -- proxied to any backend (shared DB)
 
 ### Robot Control (robot-specific)
 | Endpoint | Method | Description |
@@ -164,6 +182,7 @@ visual-patrol/
 | `/api/{id}/patrol/schedule` | GET/POST | Manage scheduled patrols |
 | `/api/{id}/patrol/schedule/{sid}` | PUT/DELETE | Update or delete schedule |
 | `/api/{id}/patrol/results` | GET | Current run inspection results |
+| `/api/{id}/patrol/live_alerts` | GET | Live monitor alerts for current run |
 
 ### Points (robot-specific)
 | Endpoint | Method | Description |
@@ -174,6 +193,13 @@ visual-patrol/
 | `/api/{id}/points/import` | POST | Import points from JSON file |
 | `/api/{id}/points/from_robot` | GET | Import saved locations from robot |
 | `/api/{id}/test_ai` | POST | Test AI on current camera frame |
+
+### Infrastructure (global)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/relay/status` | GET | RTSP relay process statuses |
+| `/api/relay/test` | POST | Quick-test robot camera relay |
+| `/api/vila/health` | GET | VILA JPS health check |
 
 ### Global Endpoints
 | Endpoint | Method | Description |
@@ -205,8 +231,14 @@ Settings are stored in a shared SQLite database (`data/report/report.db`, table 
 | `enable_idle_stream` | Camera stream when not patrolling |
 | `enable_telegram` | Telegram notifications on patrol completion |
 | `telegram_bot_token` / `telegram_user_id` | Telegram config |
+| `vila_jps_url` | VILA JPS API base URL (e.g. `http://localhost:5010`) |
+| `enable_robot_camera_relay` | Relay robot camera to mediamtx via ffmpeg |
+| `enable_external_rtsp` | Relay external RTSP camera to mediamtx |
+| `external_rtsp_url` | External RTSP camera source URL |
+| `enable_live_monitor` | Enable VILA JPS live monitoring during patrol |
+| `live_monitor_rules` | List of yes/no alert rules for live monitoring |
 
-Per-robot settings (`ROBOT_ID`, `ROBOT_NAME`, `ROBOT_IP`) are set via environment variables in `docker-compose.yml`.
+Per-robot settings (`ROBOT_ID`, `ROBOT_NAME`, `ROBOT_IP`, `MEDIAMTX_*`) are set via environment variables in `docker-compose.yml`.
 
 ## Deployment
 
@@ -217,7 +249,7 @@ Docker images are automatically built for **linux/amd64** and **linux/arm64** on
 docker compose -f deploy/docker-compose.prod.yaml up -d
 ```
 
-See [deploy/README.md](deploy/README.md) for production setup including multi-robot configuration.
+See [docs/deployment.md](docs/deployment.md) for production setup including multi-robot configuration and mediamtx port configuration.
 
 ## Local Development
 
@@ -243,6 +275,8 @@ python src/backend/app.py
 | PDF generation failed | Check `logs/{robot-id}_app.log` |
 | Camera stream not loading | Enable "Continuous Camera Stream" in Settings; check robot connection |
 | Map not loading | Robot may still be connecting; check container logs for gRPC errors |
+| mediamtx port conflict | Change RTSP port via `MTX_RTSPADDRESS=:8555` env var on mediamtx service |
+| Live monitor not triggering | Verify VILA JPS is running, streams are registered (`/api/relay/status`), and `vila_jps_url` is set |
 
 ## Documentation
 
