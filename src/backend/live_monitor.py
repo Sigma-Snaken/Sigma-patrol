@@ -217,7 +217,7 @@ class LiveMonitor:
     def _register_stream(self, vila_jps_url, rtsp_url, name):
         """POST /api/v1/live-stream to register a stream. Returns stream_id or None."""
         url = f"{vila_jps_url}/api/v1/live-stream"
-        body = {"url": rtsp_url, "name": name}
+        body = {"liveStreamUrl": rtsp_url, "name": name}
         resp = requests.post(url, json=body, timeout=15)
         resp.raise_for_status()
         data = resp.json()
