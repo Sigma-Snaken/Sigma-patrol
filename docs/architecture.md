@@ -18,11 +18,11 @@ Visual Patrol is a multi-robot autonomous inspection system. A web-based single-
                    Shared SQLite DB (WAL)
                      data/report/report.db
 
-              mediamtx (RTSP relay, port 8554/8555)
-              /{robot-id}/camera   ← ffmpeg (gRPC JPEG)
-              /{robot-id}/external ← ffmpeg (RTSP copy)
+              mediamtx (RTSP relay, port 8555)
+              /{robot-id}/camera   ← ffmpeg transcode (gRPC JPEG)
+              /{robot-id}/external ← ffmpeg transcode (RTSP source)
                         |
-                   VILA JPS (external)
+                   VILA JPS (h264parse + nvv4l2decoder)
                    Streams → Alert Rules → WebSocket events
 ```
 
@@ -57,14 +57,18 @@ Each robot runs its own Flask process. The backend handles:
 
 ### RTSP Relay (mediamtx + ffmpeg)
 
-- **mediamtx**: Lightweight RTSP server (`bluenviron/mediamtx` Docker image)
-- **ffmpeg**: Managed by `relay_manager.py` as subprocesses
+- **mediamtx**: Lightweight RTSP server (`bluenviron/mediamtx` Docker image, port 8555 on Jetson)
+- **ffmpeg**: Managed by `relay_service.py` (Jetson) or `relay_manager.py` (local fallback)
 
-Two relay types:
-1. **Robot camera relay**: gRPC JPEG frames → ffmpeg `image2pipe` → H.264 → RTSP push to `/{robot-id}/camera`
-2. **External RTSP relay**: Source RTSP → ffmpeg `copy` codec → RTSP push to `/{robot-id}/external`
+Two relay types, both **transcoded** to H264 Baseline profile for NvMMLite hardware decoder compatibility:
+1. **Robot camera relay**: gRPC JPEG frames → ffmpeg `image2pipe` → libx264/NVENC → RTSP push to `/{robot-id}/camera`
+2. **External RTSP relay**: Source RTSP → ffmpeg transcode (libx264/NVENC) → RTSP push to `/{robot-id}/external`
 
-VILA JPS pulls these RTSP streams from mediamtx for continuous analysis.
+Two deployment modes:
+- **Jetson relay service** (`relay_service.py`, port 5020): Standalone Flask app on Jetson managing ffmpeg processes. VP sends frames via HTTP POST. CI-built image at `ghcr.io/sigma-snaken/visual-patrol-relay:latest`.
+- **Local fallback** (`relay_manager.py`): ffmpeg runs as subprocesses in the Flask container. Used when `RELAY_SERVICE_URL` is not set or unreachable.
+
+VILA JPS pulls these RTSP streams from mediamtx for continuous VLM analysis.
 
 ### VILA JPS Integration
 
@@ -72,8 +76,9 @@ VILA JPS pulls these RTSP streams from mediamtx for continuous analysis.
 - **Alert API**: `POST /api/v1/alerts` sets yes/no alert rules per stream
 - **WebSocket**: `ws://{host}:5016/api/v1/alerts/ws` delivers real-time alert events
 - **Deregister**: `DELETE /api/v1/live-stream/{id}` cleans up on patrol stop
+- **streaming.py patch**: JPS requires a patched `streaming.py` (`deploy/vila-jps/streaming_patched.py`) that adds `h264parse` to the GStreamer pipeline for NvMMLite decoder compatibility
 
-When an alert fires, the backend captures an evidence frame (gRPC for robot camera, cv2 for external RTSP), saves it to disk and DB, and sends it to Telegram if configured.
+When an alert fires, the backend captures an evidence frame from mediamtx via OpenCV RTSP, saves it to disk and DB, and sends it to Telegram if configured.
 
 ### Reverse Proxy (nginx)
 
@@ -122,10 +127,10 @@ Any backend can serve global requests because they all share the same database.
 
 ```
 1. Patrol starts
-   ├── relay_manager starts ffmpeg subprocesses
-   │   ├── Robot camera: gRPC frames → ffmpeg pipe → mediamtx RTSP
-   │   └── External RTSP: source → ffmpeg copy → mediamtx RTSP
-   └── Wait 3s for streams to establish
+   ├── relay_manager starts relay (Jetson service or local ffmpeg)
+   │   ├── Robot camera: gRPC frames → ffmpeg transcode → mediamtx RTSP
+   │   └── External RTSP: source → ffmpeg transcode → mediamtx RTSP
+   └── Wait for stream ready on mediamtx
 
 2. LiveMonitor.start()
    ├── POST /api/v1/live-stream → register each stream → get stream_id
@@ -136,7 +141,7 @@ Any backend can serve global requests because they all share the same database.
    ├── VILA JPS pulls RTSP streams, evaluates rules continuously
    ├── On alert → WebSocket event delivered to backend
    │   ├── Cooldown check (60s per rule+stream)
-   │   ├── Capture evidence frame (gRPC or cv2)
+   │   ├── Capture evidence frame from mediamtx (cv2 RTSP)
    │   ├── Save JPEG to data/{robot_id}/report/live_alerts/
    │   ├── INSERT INTO live_alerts
    │   └── Send Telegram photo if configured
