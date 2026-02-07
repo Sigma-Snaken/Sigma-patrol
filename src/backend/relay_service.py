@@ -35,7 +35,7 @@ MEDIAMTX_HOST = os.getenv("MEDIAMTX_HOST", "localhost:8555")
 USE_NVENC = os.getenv("USE_NVENC", "true").lower() in ("true", "1", "yes")
 LOG_DIR = os.getenv("LOG_DIR", "./logs")
 
-MAX_RETRIES = 3
+MAX_RETRIES = 0  # 0 = unlimited retries
 MONITOR_INTERVAL = 10
 FEEDER_FPS = 5
 FEEDER_INTERVAL = 1.0 / FEEDER_FPS
@@ -337,7 +337,7 @@ class RelayServiceManager:
                 if entry.process.poll() is None:
                     continue
 
-                if entry.restart_count >= MAX_RETRIES:
+                if MAX_RETRIES > 0 and entry.restart_count >= MAX_RETRIES:
                     logger.error(f"Relay {entry.key} exceeded max retries ({MAX_RETRIES}), giving up")
                     continue
 
@@ -370,6 +370,7 @@ class RelayServiceManager:
                             entry.started_at = time.time()
 
                     logger.info(f"Relay {entry.key} restarted successfully")
+                    entry.restart_count = 0  # reset on success
                 except Exception as e:
                     logger.error(f"Failed to restart relay {entry.key}: {e}")
 
