@@ -26,7 +26,7 @@ logger = get_logger("relay_manager", "relay_manager.log")
 
 MAX_RETRIES = 3
 MONITOR_INTERVAL = 10
-FEEDER_INTERVAL = 0.2  # 5 fps
+FEEDER_INTERVAL = 2.0  # 0.5 fps (1 frame per 2s)
 
 
 def wait_for_stream(rtsp_url, max_wait=20):
@@ -178,7 +178,7 @@ class RelayServiceClient:
 
 
 class FrameFeederThread:
-    """Grabs gRPC frames and POSTs them to the relay service at ~5fps."""
+    """Grabs gRPC frames and POSTs them to the relay service at ~0.5fps."""
 
     def __init__(self, key, frame_func, client):
         self._key = key
@@ -259,7 +259,7 @@ class RelayManager:
         cmd = [
             "ffmpeg", "-y",
             "-f", "image2pipe",
-            "-framerate", "5",
+            "-framerate", "1/2",
             "-i", "pipe:0",
             "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
             "-c:v", "libx264",
@@ -268,7 +268,7 @@ class RelayManager:
             "-profile:v", "baseline",
             "-level", "3.1",
             "-pix_fmt", "yuv420p",
-            "-x264-params", "keyint=30:min-keyint=30:repeat-headers=1",
+            "-x264-params", "keyint=1:min-keyint=1:repeat-headers=1",
             "-bsf:v", "dump_extra",
             "-f", "rtsp",
             "-rtsp_transport", "tcp",

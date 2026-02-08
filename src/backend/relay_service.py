@@ -37,7 +37,7 @@ LOG_DIR = os.getenv("LOG_DIR", "./logs")
 
 MAX_RETRIES = 0  # 0 = unlimited retries
 MONITOR_INTERVAL = 10
-FEEDER_FPS = 5
+FEEDER_FPS = 0.5  # 1 frame per 2s (Jetson processes ~1.5s/frame)
 FEEDER_INTERVAL = 1.0 / FEEDER_FPS
 
 # --- Logging ---
@@ -214,7 +214,7 @@ class RelayServiceManager:
                 "-preset", "ultrafast", "-tune", "zerolatency",
                 "-profile:v", "baseline", "-level", "3.1",
                 "-pix_fmt", "yuv420p",
-                "-x264-params", "keyint=30:min-keyint=30:repeat-headers=1",
+                "-x264-params", "keyint=1:min-keyint=1:repeat-headers=1",
                 "-bsf:v", "dump_extra",
                 "-f", "rtsp", "-rtsp_transport", "tcp",
                 rtsp_url,
@@ -239,7 +239,7 @@ class RelayServiceManager:
                 "-rtsp_transport", "tcp",
                 "-i", source_url,
                 "-an",
-                "-vf", "fps=5,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                "-vf", "fps=0.5,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
                 "-c:v", "h264_nvmpi",
                 "-b:v", "2M",
                 "-pix_fmt", "yuv420p",
@@ -252,12 +252,12 @@ class RelayServiceManager:
                 "-rtsp_transport", "tcp",
                 "-i", source_url,
                 "-an",
-                "-vf", "fps=5,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                "-vf", "fps=0.5,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
                 "-c:v", "libx264",
                 "-preset", "ultrafast", "-tune", "zerolatency",
                 "-profile:v", "baseline", "-level", "3.1",
                 "-pix_fmt", "yuv420p",
-                "-x264-params", "keyint=30:min-keyint=30:repeat-headers=1",
+                "-x264-params", "keyint=1:min-keyint=1:repeat-headers=1",
                 "-bsf:v", "dump_extra",
                 "-f", "rtsp", "-rtsp_transport", "tcp",
                 rtsp_url,
